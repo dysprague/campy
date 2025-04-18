@@ -110,6 +110,23 @@ def ConfigureParams():
 
 	return params
 
+def ConfigureSimParams(systems, params, n_cam):
+	# Insert camera-specific metadata from parameters into cam_params dictionary
+	cam_params = params
+	cam_params["n_cam"] = n_cam
+	cam_params["baseFolder"] = os.getcwd()
+	cam_params["cameraName"] = params["cameraNames"][n_cam]
+
+	cam_params = OptParams(cam_params)
+	cam_make = cam_params["cameraMake"]
+	cam_idx = cam_params["cameraSelection"]
+
+	cam_params["device"] = systems[cam_make]["deviceList"][cam_idx]
+	cam_params = unicam.LoadDevice(systems, params, cam_params)
+
+	cam_params["cameraSerialNo"] = systems[cam_make]["serials"][cam_idx]
+
+	return cam_params
 
 def ConfigureCamParams(systems, params, n_cam):
 	# Insert camera-specific metadata from parameters into cam_params dictionary

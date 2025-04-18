@@ -6,7 +6,10 @@ reduce redundancy in campy code.
 import os, sys, time, csv, logging
 import numpy as np
 from collections import deque
+#import tensorflow as tf
 from scipy import io as sio
+import cv2
+import traceback
 
 
 def ImportCam(make):
@@ -120,15 +123,93 @@ def CountFPS(grabdata, frameNumber, timeStamp):
 		fpsCount = round(frameNumber / timeElapsed, 1)
 		print('{} collected {} frames at {} fps for {} sec.'\
 			.format(grabdata["cameraName"], frameNumber, fpsCount, round(timeElapsed)))
+		
+def read_frames(video_path, fidxs=None, grayscale=True):
+    """Read frames from a video file.
+    
+    Args:
+        video_path: Path to MP4
+        fidxs: List of frame indices or None to read all frames (default: None)
+        grayscale: Keep only one channel of the images (default: True)
+    
+    Returns:
+        Loaded images in array of shape (n_frames, height, width, channels) and dtype uint8.
+    """
+    vr = cv2.VideoCapture(video_path)
+    if fidxs is None:
+        fidxs = np.arange(vr.get(cv2.CAP_PROP_FRAME_COUNT))
+    frames = []
+    for fidx in fidxs:
+        vr.set(cv2.CAP_PROP_POS_FRAMES, fidx)
+        img = vr.read()[1]
+        if grayscale:
+            img = img[:, :, [0]]
+        frames.append(img)
+    return np.stack(frames, axis=0)
+		
+def SimulateFrames(n_cam, writeQueue, frameQueue, stopReadQueue, stopWriteQueue, stop_event):
+
+	print('initializing cameras')
+	
+	# Create dictionary for appending frame number and timestamp information
+	#grabdata = GrabData(cam_params)
+	grabdata = {'frameNumber':[], 'timeStamp':[]}
+
+	#frames = read_frames('./test/example.mp4', fidxs=np.arange(5000), grayscale=False)
+	#frames = np.ones((200, 1200, 1920, 3))
+
+	frameNumber = 0
+
+	print(f'Setup camera {n_cam}')
+	time.sleep(60)
+
+	while(not stopReadQueue) and (not stop_event.is_set()):
+		try:
+			# Append numpy array to writeQueue for writer to append to file
+			#img = frames[frameNumber, :,:,:]
+			img = np.ones((1200,1920,3)).astype(np.float32)
+			#writeQueue.append(img)
+
+			timeStamp = time.time()
+
+			#TODO: move img to tensorflow and convert to float32 before sending to processer
+			#with tf.device('/GPU:0'):
+				# Create a tensor on the GPU
+			#	gpu_tensor = tf.convert_to_tensor(img)
+			#gpu_tensor = tf.cast(gpu_tensor, tf.float32)
+			
+			frameQueue.put(img)
+
+			#CountFPS(grabdata, frameNumber, timeStamp)
+
+			frameNumber += 1
+
+			# Append timeStamp and frameNumber to grabdata
+			grabdata['frameNumber'].append(frameNumber) # first frame = 1
+			grabdata['timeStamp'].append(timeStamp)
+
+		except Exception as e:
+			traceback.print_exc()
+			time.sleep(0.001)
+
+		except KeyboardInterrupt:
+			print(f"[Cam {n_cam}] Interrupted by user")
+			stop_event.set()
+			break
 
 
-def GrabFrames(cam_params, writeQueue, dispQueue, stopReadQueue, stopWriteQueue):
+		if frameNumber >= 100:
+			break
+
+		time.sleep(0.05) #sleep for 50 msec to simulate camera acquisition
+
+	# Close the camaera, save metadata, and tell writer and display to close
+	SaveSimulation(n_cam, grabdata)
+	stopWriteQueue.append('STOP')
+
+def GrabFrames(cam_params, writeQueue, frameQueue, stopReadQueue, stopWriteQueue):
 	# Open the camera object
 	cam, camera, cam_params = OpenCamera(cam_params, stopWriteQueue)
-
-	# Use Basler's default display window on Windows. Not supported on Linux
-	if sys.platform=='win32' and cam_params["cameraMake"] == 'basler':
-		dispQueue = cam.OpenPylonImageWindow(cam_params)
 
 	# Create dictionary for appending frame number and timestamp information
 	grabdata = GrabData(cam_params)
@@ -146,15 +227,14 @@ def GrabFrames(cam_params, writeQueue, dispQueue, stopReadQueue, stopWriteQueue)
 			img = cam.GetImageArray(grabResult)
 			writeQueue.append(img)
 
+			#TODO: move img to tensorflow and convert to float32 before sending to processer
+			frameQueue.put(img)
+
 			# Append timeStamp and frameNumber to grabdata
 			frameNumber += 1
 			grabdata['frameNumber'].append(frameNumber) # first frame = 1
 			timeStamp = cam.GetTimeStamp(grabResult)
 			grabdata['timeStamp'].append(timeStamp)
-
-			# Display converted, downsampled image in the Window
-			if frameNumber % grabdata["frameRatio"] == 0:
-				img = cam.DisplayImage(cam_params, dispQueue, grabResult)
 
 			CountFPS(grabdata, frameNumber, timeStamp)
 
@@ -171,22 +251,31 @@ def GrabFrames(cam_params, writeQueue, dispQueue, stopReadQueue, stopWriteQueue)
 	# Close the camaera, save metadata, and tell writer and display to close
 	cam.CloseCamera(cam_params, camera)
 	SaveMetadata(cam_params, grabdata)
-	if not sys.platform=='win32' or not cam_params['cameraMake'] == 'basler':
-		dispQueue.append('STOP')
 	stopWriteQueue.append('STOP')
 
+def SaveSimulation(n_cam, grabdata):
+	
+	# Get the frame and time counts to save into metadata
+	frame_count = grabdata['frameNumber'][-1]
+	time_count = grabdata['timeStamp'][-1]-grabdata['timeStamp'][0]
+	fps_count = int(round(frame_count/time_count))
+
+	# Save frame data to numpy file
+	npy_filename = os.path.join('./test', f'camera_{n_cam}_frametimes.npy')
+	x = np.array([grabdata['frameNumber'], grabdata['timeStamp']])
+	np.save(npy_filename,x)
 
 def SaveMetadata(cam_params, grabdata):
 	full_folder_name = os.path.join(cam_params["videoFolder"], cam_params["cameraName"])
 
 	try:
 		# Zero timeStamps
-		timeFirstGrab = grabdata["timeStamp"][0]
-		grabdata["timeStamp"] = [i - timeFirstGrab for i in grabdata["timeStamp"]]
+		#timeFirstGrab = grabdata["timeStamp"][0]
+		#grabdata["timeStamp"] = [i - timeFirstGrab for i in grabdata["timeStamp"]]
 
 		# Get the frame and time counts to save into metadata
 		frame_count = grabdata['frameNumber'][-1]
-		time_count = grabdata['timeStamp'][-1]
+		time_count = grabdata['timeStamp'][-1]-grabdata['timeStamp'][0]
 		fps_count = int(round(frame_count/time_count))
 		print('{} saved {} frames at {} fps.'.format(cam_params["cameraName"], frame_count, fps_count))
 

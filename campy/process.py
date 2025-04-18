@@ -1,0 +1,188 @@
+import sys, time, logging, warnings
+import numpy as np
+import tensorflow as tf
+import os
+import tensorrt 
+
+from tensorflow.python.compiler.tensorrt import trt_convert as tf_trt
+from tensorflow.python.saved_model import tag_constants
+from typing import List, Optional, Text
+
+precision_dict = {
+    "FP32": tf_trt.TrtPrecisionMode.FP32,
+    "FP16": tf_trt.TrtPrecisionMode.FP16,
+    "INT8": tf_trt.TrtPrecisionMode.INT8,
+}
+
+def get_available_gpus() -> List[tf.config.PhysicalDevice]:
+    """Return a list of available GPUs."""
+    return tf.config.get_visible_devices("GPU")
+
+
+def disable_preallocation():
+    """Disable preallocation of full GPU memory on all available GPUs.
+
+    This enables memory growth policy so that TensorFlow will not pre-allocate all
+    available GPU memory.
+
+    Preallocation can be more efficient, but can lead to CUDA startup errors when the
+    memory is not available (e.g., shared, multi-session and some *nix systems).
+
+    See also: enable_gpu_preallocation
+    """
+    for gpu in get_available_gpus():
+        tf.config.experimental.set_memory_growth(gpu, True)
+
+class OptimizedModel():
+    def __init__(self, saved_model_dir = None):
+        self.loaded_model_fn = None
+        
+        if not saved_model_dir is None:
+            self.load_model(saved_model_dir)
+            
+    
+    def predict(self, input_data, batch_size=None): 
+        if self.loaded_model_fn is None:
+            raise(Exception("Haven't loaded a model"))
+            
+        if batch_size is not None:
+            all_inds = np.arange(len(input_data))
+            all_preds = []
+            for inds in np.array_split(all_inds, int(np.ceil(len(all_inds) / batch_size))):
+                all_preds.append(self.predict(input_data[inds]))
+            return all_preds
+                
+#         x = tf.constant(input_data.astype('float32'))
+        x = tf.constant(input_data)
+        labeling = self.loaded_model_fn(input=x)
+        try:
+            preds = labeling['predictions'].numpy()
+        except:
+            try:
+                preds = labeling['probs'].numpy()
+            except:
+                try:
+                    preds = labeling[next(iter(labeling.keys()))]
+                except:
+                    raise(Exception("Failed to get predictions from saved model object"))
+        return preds
+    
+    def load_model(self, saved_model_dir):
+        saved_model_loaded = tf.saved_model.load(saved_model_dir, tags=[tag_constants.SERVING])
+        wrapper_fp32 = saved_model_loaded.signatures['serving_default']
+        
+        self.loaded_model_fn = wrapper_fp32
+
+class BehaviorBuffer:
+    def __init__(self, num_frames, num_keypoints, dims, template):
+        self.buffer = np.zeros((num_frames, num_keypoints, dims))
+        self.template = template
+
+    def append(self, keypoints):
+        self.buffer[:-1] = self.buffer[1:]
+        self.buffer[-1] = keypoints
+
+    def get(self):
+        return self.buffer
+    
+    def compare_template():
+        return False
+
+def ProcessData():
+    processdata = {}
+    processdata["timeStamp"] = []
+    processdata["frameNumber"] = []
+    processdata["frameProcessTime"] = []
+    
+    return processdata
+
+def triangulate(keypoints):
+    return keypoints
+
+def SaveMetadata(process_params, processdata):
+    npy_filename = './test/frametimes_processed.npy'
+
+    x = np.array([processdata['frameNumber'], processdata['timeStamp'], processdata['frameProcessTime']])
+    np.save(npy_filename,x)
+
+def ProcessFrames(process_params, ProcessQueues, stop_event):
+
+    disable_preallocation()
+
+    print('GPU initialized')
+
+    n_cams = process_params['n_cams']
+    model_path = process_params['model_path']
+    buffer_size = process_params['buffer_size']
+    n_keypoints = process_params['num_keypoints']
+    img_shape = process_params['img_shape']
+    template = process_params['template']
+
+    model = OptimizedModel(model_path)
+
+    print('Model loaded')
+
+    trace_data = np.ones(img_shape)
+
+    trace_data = trace_data.astype(np.float32)
+
+    model.predict(trace_data) #initialize graph
+
+    print('Model loaded and initialized')
+
+    cam_frames = [None]*n_cams
+
+    behavior = BehaviorBuffer(buffer_size, n_keypoints, 3, template)
+
+    processdata = ProcessData()
+
+    framenumber = 0
+
+    while not stop_event.is_set():
+        try: 
+            for cam in np.arange(n_cams):
+                if cam_frames[cam] is None:
+                    if not ProcessQueues[cam].empty():
+                        cam_frames[cam] = ProcessQueues[cam].get()
+            
+            if all(not element is None for element in cam_frames):
+                data = np.stack(cam_frames, axis=0)
+                with tf.device('/GPU:0'):
+				# Create a tensor on the GPU
+                    gpu_tensor = tf.convert_to_tensor(data)
+                pre_predict = time.perf_counter()
+                output = model.predict(gpu_tensor)
+                #keypoints_3D = triangulate(output)
+
+                #behavior.append(keypoints_3D)
+
+                #trigger_reward = behavior.compare_template()
+
+                timeStamp = time.perf_counter()
+                framenumber +=1
+
+                processdata['frameNumber'].append(framenumber)
+                processdata['timeStamp'].append(timeStamp)
+                processdata['frameProcessTime'].append(timeStamp-pre_predict)
+
+                cam_frames = [None]*n_cams
+
+                if framenumber % 10 == 0:
+                    print(f'Processed frame {framenumber}')
+
+            time.sleep(0.001)
+
+        except Exception as e:
+            print(Exception)
+            break
+            
+        except KeyboardInterrupt:
+            print(f"Processor Interrupted by user")
+            stop_event.set()
+            break
+
+    print(output.shape)
+
+    SaveMetadata(process_params, processdata)
+
+        

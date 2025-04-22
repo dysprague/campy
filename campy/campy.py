@@ -66,7 +66,7 @@ daemon = True,
 	# Start video file writer (main "consumer" process)
 	writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
 
-def AcquireSimulation(n_cam, frameQueue):
+def AcquireSimulation(n_cam, frameQueue, startQueue):
 	# Initialize param dictionary for this camera stream
 	stop_event = mp.Event()
 	cam_params = params
@@ -80,7 +80,7 @@ def AcquireSimulation(n_cam, frameQueue):
 	t = threading.Thread(
 		target = unicam.SimulateFrames,
 daemon = False,
-		args = (n_cam, writeQueue, frameQueue, stopReadQueue, stopWriteQueue, stop_event,),
+		args = (n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue, stop_event,),
 		)
 	
 	t.start()
@@ -108,15 +108,16 @@ def Main():
 
 	manager = mp.Manager()
 	frame_queues = [manager.Queue(maxsize=10) for _ in range(params["numCams"])]
+	start_queues = [manager.Queue(maxsize=10) for _ in range(params["numCams"])]
 	
 	with HandleKeyboardInterrupt():
 		stop_event = mp.Event()
-		processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, stop_event,))
+		processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, start_queues, stop_event,))
 		processor.start()
 
 		procs = []
 		for i in range(params["numCams"]):
-			acq_proc = mp.Process(target=AcquireSimulation, args=(i, frame_queues[i]))
+			acq_proc = mp.Process(target=AcquireSimulation, args=(i, frame_queues[i], start_queues[i]))
 			acq_proc.start()
 			procs.append(acq_proc)
 

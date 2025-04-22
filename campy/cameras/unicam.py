@@ -147,7 +147,7 @@ def read_frames(video_path, fidxs=None, grayscale=True):
         frames.append(img)
     return np.stack(frames, axis=0)
 		
-def SimulateFrames(n_cam, writeQueue, frameQueue, stopReadQueue, stopWriteQueue, stop_event):
+def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue, stop_event):
 
 	print('initializing cameras')
 	
@@ -155,22 +155,27 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, stopReadQueue, stopWriteQueue,
 	#grabdata = GrabData(cam_params)
 	grabdata = {'frameNumber':[], 'timeStamp':[]}
 
-	#frames = read_frames('./test/example.mp4', fidxs=np.arange(5000), grayscale=False)
 	#frames = np.ones((200, 1200, 1920, 3))
 
 	frameNumber = 0
 
 	print(f'Setup camera {n_cam}')
-	time.sleep(60)
+
+	startQueue.get(block=True) #block until receive start signal from processing module
+
+	print('Start camera acquisition')
 
 	while(not stopReadQueue) and (not stop_event.is_set()):
 		try:
 			# Append numpy array to writeQueue for writer to append to file
 			#img = frames[frameNumber, :,:,:]
-			img = np.ones((1200,1920,3)).astype(np.float32)
+			frame = read_frames('./test/example.mp4', fidxs=[frameNumber], grayscale=False) #load frame
+			
+
+			img = frame.astype(np.float32)
 			#writeQueue.append(img)
 
-			timeStamp = time.time()
+			timeStamp = perf_counter() # frame acquisition time
 
 			#TODO: move img to tensorflow and convert to float32 before sending to processer
 			#with tf.device('/GPU:0'):

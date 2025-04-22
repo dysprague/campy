@@ -105,7 +105,7 @@ def SaveMetadata(process_params, processdata):
     x = np.array([processdata['frameNumber'], processdata['timeStamp'], processdata['frameProcessTime']])
     np.save(npy_filename,x)
 
-def ProcessFrames(process_params, ProcessQueues, stop_event):
+def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
 
     disable_preallocation()
 
@@ -130,7 +130,8 @@ def ProcessFrames(process_params, ProcessQueues, stop_event):
 
     print('Model loaded and initialized')
 
-    cam_frames = [None]*n_cams
+    cam_frames = [False]*n_cams
+    cam_frame_numbers = [0,0,0]
 
     behavior = BehaviorBuffer(buffer_size, n_keypoints, 3, template)
 
@@ -138,18 +139,31 @@ def ProcessFrames(process_params, ProcessQueues, stop_event):
 
     framenumber = 0
 
+    with tf.device('/GPU:0'):
+        gpu_tensor = tf.Variable(initial_value=tf.zeros((3, 1200, 1920, 3), dtype=tf.float16), trainable=False)
+
+    for sq in startQueues:
+        sq.put("start")
+
     while not stop_event.is_set():
         try: 
             for cam in np.arange(n_cams):
-                if cam_frames[cam] is None:
+                if cam_frames[cam] is False:
                     if not ProcessQueues[cam].empty():
-                        cam_frames[cam] = ProcessQueues[cam].get()
+                        try:
+                            with tf.device('/GPU:0'):
+                                data = ProcessQueues[cam].get()
+                                gpu_tensor[cam].assign()
+                            cam_frames[cam] = True
+                            cam_frame_numbers[cam] +=1
+                        except Exception as e:
+                            traceback.print_exc()
             
             if all(not element is None for element in cam_frames):
-                data = np.stack(cam_frames, axis=0)
-                with tf.device('/GPU:0'):
+                #data = np.stack(cam_frames, axis=0)
+                #with tf.device('/GPU:0'):
 				# Create a tensor on the GPU
-                    gpu_tensor = tf.convert_to_tensor(data)
+                #    gpu_tensor = tf.convert_to_tensor(data)
                 pre_predict = time.perf_counter()
                 output = model.predict(gpu_tensor)
                 #keypoints_3D = triangulate(output)
@@ -165,7 +179,7 @@ def ProcessFrames(process_params, ProcessQueues, stop_event):
                 processdata['timeStamp'].append(timeStamp)
                 processdata['frameProcessTime'].append(timeStamp-pre_predict)
 
-                cam_frames = [None]*n_cams
+                cam_frames = [False]*n_cams
 
                 if framenumber % 10 == 0:
                     print(f'Processed frame {framenumber}')
@@ -173,7 +187,7 @@ def ProcessFrames(process_params, ProcessQueues, stop_event):
             time.sleep(0.001)
 
         except Exception as e:
-            print(Exception)
+            traceback.print_exc()
             break
             
         except KeyboardInterrupt:

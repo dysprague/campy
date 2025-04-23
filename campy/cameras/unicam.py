@@ -127,8 +127,8 @@ def GrabFrames(cam_params, writeQueue, dispQueue, stopReadQueue, stopWriteQueue)
 	cam, camera, cam_params = OpenCamera(cam_params, stopWriteQueue)
 
 	# Use Basler's default display window on Windows. Not supported on Linux
-	if sys.platform=='win32' and cam_params["cameraMake"] == 'basler':
-		dispQueue = cam.OpenPylonImageWindow(cam_params)
+	#if sys.platform=='win32' and cam_params["cameraMake"] == 'basler':
+	#	dispQueue = cam.OpenPylonImageWindow(cam_params)
 
 	# Create dictionary for appending frame number and timestamp information
 	grabdata = GrabData(cam_params)
@@ -154,7 +154,8 @@ def GrabFrames(cam_params, writeQueue, dispQueue, stopReadQueue, stopWriteQueue)
 
 			# Display converted, downsampled image in the Window
 			if frameNumber % grabdata["frameRatio"] == 0:
-				img = cam.DisplayImage(cam_params, dispQueue, grabResult)
+				print(img.shape)
+				#img = cam.DisplayImage(cam_params, dispQueue, grabResult)
 
 			CountFPS(grabdata, frameNumber, timeStamp)
 

@@ -122,6 +122,8 @@ def ConfigureCamParams(systems, params, n_cam):
 	cam_make = cam_params["cameraMake"]
 	cam_idx = cam_params["cameraSelection"]
 
+	print(systems[cam_make])
+
 	cam_params["device"] = systems[cam_make]["deviceList"][cam_idx]
 	cam_params = unicam.LoadDevice(systems, params, cam_params)
 

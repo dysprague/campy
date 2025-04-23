@@ -45,6 +45,7 @@ def CloseSystems(systems, params):
 
 def AcquireOneCamera(n_cam):
 	# Initialize param dictionary for this camera stream
+	print(systems)
 	cam_params = configurator.ConfigureCamParams(systems, params, n_cam)
 
 	# Initialize queues for display, video writer, and stop messages

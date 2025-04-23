@@ -6,7 +6,7 @@ reduce redundancy in campy code.
 import os, sys, time, csv, logging
 import numpy as np
 from collections import deque
-#import tensorflow as tf
+import tensorflow as tf
 from scipy import io as sio
 import cv2
 import traceback
@@ -153,7 +153,7 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 	
 	# Create dictionary for appending frame number and timestamp information
 	#grabdata = GrabData(cam_params)
-	grabdata = {'frameNumber':[], 'timeStamp':[]}
+	grabdata = {'frameNumber':[], 'timeStamp':[], 'readTime':[], 'preprocess':[], 'loadonqueue':[]}
 
 	#frames = np.ones((200, 1200, 1920, 3))
 
@@ -169,13 +169,23 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 		try:
 			# Append numpy array to writeQueue for writer to append to file
 			#img = frames[frameNumber, :,:,:]
-			frame = read_frames('./test/example.mp4', fidxs=[frameNumber], grayscale=False) #load frame
-			
 
-			img = frame.astype(np.float32)
+			preread = time.perf_counter()
+
+			frame = read_frames('./test/example.mp4', fidxs=[frameNumber], grayscale=False) #load frame
+
+			prepreprocess = time.perf_counter()
+			
+			with tf.device('/GPU:0'):
+				#frame_use = frame/255
+				frame_use = tf.image.convert_image_dtype(frame, tf.float32)
+				imresized = tf.image.resize(frame_use, size=[600,960], method='bilinear', preserve_aspect_ratio=False, antialias=False,)
+				imresized = tf.transpose(imresized, perm=[0,3,1,2])
+
+			#img = frame.astype(np.float32)
 			#writeQueue.append(img)
 
-			timeStamp = perf_counter() # frame acquisition time
+			timeStamp = time.perf_counter() # frame acquisition time
 
 			#TODO: move img to tensorflow and convert to float32 before sending to processer
 			#with tf.device('/GPU:0'):
@@ -183,7 +193,9 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 			#	gpu_tensor = tf.convert_to_tensor(img)
 			#gpu_tensor = tf.cast(gpu_tensor, tf.float32)
 			
-			frameQueue.put(img)
+			frameQueue.put(imresized)
+
+			post_put_on_queue = time.perf_counter()
 
 			#CountFPS(grabdata, frameNumber, timeStamp)
 
@@ -192,10 +204,15 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 			# Append timeStamp and frameNumber to grabdata
 			grabdata['frameNumber'].append(frameNumber) # first frame = 1
 			grabdata['timeStamp'].append(timeStamp)
+			grabdata['readTime'].append(prepreprocess-preread)
+			grabdata['preprocess'].append(timeStamp-prepreprocess)
+			grabdata['loadonqueue'].append(post_put_on_queue-prepreprocess)
+
 
 		except Exception as e:
 			traceback.print_exc()
 			time.sleep(0.001)
+			break
 
 		except KeyboardInterrupt:
 			print(f"[Cam {n_cam}] Interrupted by user")
@@ -203,10 +220,10 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 			break
 
 
-		if frameNumber >= 100:
+		if frameNumber >= 1000:
 			break
 
-		time.sleep(0.05) #sleep for 50 msec to simulate camera acquisition
+		#time.sleep(0.05) #sleep for 50 msec to simulate camera acquisition
 
 	# Close the camaera, save metadata, and tell writer and display to close
 	SaveSimulation(n_cam, grabdata)
@@ -267,7 +284,7 @@ def SaveSimulation(n_cam, grabdata):
 
 	# Save frame data to numpy file
 	npy_filename = os.path.join('./test', f'camera_{n_cam}_frametimes.npy')
-	x = np.array([grabdata['frameNumber'], grabdata['timeStamp']])
+	x = np.array([grabdata['frameNumber'], grabdata['timeStamp'], grabdata['readTime'], grabdata['preprocess'], grabdata['loadonqueue']])
 	np.save(npy_filename,x)
 
 def SaveMetadata(cam_params, grabdata):

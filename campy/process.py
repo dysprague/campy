@@ -8,6 +8,8 @@ from tensorflow.python.compiler.tensorrt import trt_convert as tf_trt
 from tensorflow.python.saved_model import tag_constants
 from typing import List, Optional, Text
 
+import traceback
+
 precision_dict = {
     "FP32": tf_trt.TrtPrecisionMode.FP32,
     "FP16": tf_trt.TrtPrecisionMode.FP16,
@@ -140,7 +142,7 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
     framenumber = 0
 
     with tf.device('/GPU:0'):
-        gpu_tensor = tf.Variable(initial_value=tf.zeros((3, 1200, 1920, 3), dtype=tf.float16), trainable=False)
+        gpu_tensor = tf.Variable(initial_value=tf.zeros((3, 3, 600, 960), dtype=tf.float32), trainable=False)
 
     for sq in startQueues:
         sq.put("start")
@@ -153,13 +155,13 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
                         try:
                             with tf.device('/GPU:0'):
                                 data = ProcessQueues[cam].get()
-                                gpu_tensor[cam].assign()
+                                gpu_tensor[cam].assign(data)
                             cam_frames[cam] = True
                             cam_frame_numbers[cam] +=1
                         except Exception as e:
                             traceback.print_exc()
             
-            if all(not element is None for element in cam_frames):
+            if all(element for element in cam_frames):
                 #data = np.stack(cam_frames, axis=0)
                 #with tf.device('/GPU:0'):
 				# Create a tensor on the GPU
@@ -176,7 +178,7 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
                 framenumber +=1
 
                 processdata['frameNumber'].append(framenumber)
-                processdata['timeStamp'].append(timeStamp)
+                processdata['timeStamp'].append(pre_predict)
                 processdata['frameProcessTime'].append(timeStamp-pre_predict)
 
                 cam_frames = [False]*n_cams

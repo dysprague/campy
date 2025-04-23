@@ -99,10 +99,10 @@ daemon = False,
 def Main():
 	process_params = {
 		'n_cams':params["numCams"],
-		'model_path':'./models/mstride16_ostride2_filters8_costride2.single_instance.trt.FP16',
+		'model_path':'./models/250421_183045.single_instance.n=8280.trt.FP32',
 		'buffer_size':20,
 		'num_keypoints':23,
-		'img_shape': (3,1200,1920,3),
+		'img_shape': (3,3,600,960),
 		'template': np.ones((20,23,3))
 	}
 

@@ -139,3 +139,5 @@ cython_debug/
 
 models/*
 test/*
+
+pylon-8.1.0_linux-x86_64_setup.tar.gz

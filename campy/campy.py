@@ -43,7 +43,7 @@ def CloseSystems(systems, params):
 	unicam.CloseSystems(systems, params)
 
 
-def AcquireOneCamera(n_cam):
+def AcquireOneCamera(n_cam, frameQueue, startQueue):
 	# Initialize param dictionary for this camera stream
 	print(systems)
 	cam_params = configurator.ConfigureCamParams(systems, params, n_cam)
@@ -63,34 +63,48 @@ def AcquireOneCamera(n_cam):
 	#	args = (cam_params, dispQueue,),
 	#	).start()
 
-	# Start grabbing frames ("producer" thread)
-	threading.Thread(
+	t = threading.Thread(
 		target = unicam.GrabFrames,
-		daemon = True,
-		args = (cam_params, writeQueue, dispQueue, stopReadQueue, stopWriteQueue,),
-		).start()
+daemon = False,
+		args = (cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue,),
+		)
+	
+	t.start()
+	
+	try:
+		t.join()
+	except KeyboardInterrupt:
+		print('Keyboard interrupted acquisition')
 
 	# Start video file writer (main "consumer" process)
-	writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
+	#writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
 
 
 def Main():
+	manager = mp.Manager()
+	frame_queues = [manager.Queue(maxsize=10) for _ in range(params["numCams"])]
+	start_queues = [manager.Queue(maxsize=10) for _ in range(params["numCams"])]
+
 	with HandleKeyboardInterrupt():
-		procs = []
+		#procs = []
 
-		print(params["numCams"])
-		for i in range(params["numCams"]):
-			print('Cam')
-			acq_proc = mp.Process(target=AcquireOneCamera, args=[i])
-			acq_proc.start()
-			procs.append(acq_proc)
+		#print(params["numCams"])
+		#for i in range(params["numCams"]):
+		#	print('Cam')
+		#	acq_proc = mp.Process(target=AcquireOneCamera, args=[i])
+		#	acq_proc.start()
+		#	procs.append(acq_proc)
 
-		for proc in procs:
-			proc.join()
+		#for proc in procs:
+		#	proc.join()
 
-		# Acquire cameras in parallel with Windows- and Linux-compatible pool
+		#Acquire cameras in parallel with Windows- and Linux-compatible pool
 		#p = mp.get_context("spawn").Pool(params["numCams"])
-		#p.map_async(AcquireOneCamera,range(params["numCams"])).get()
+		#p.starmap_async(AcquireOneCamera,range(params["numCams"])).get()
+
+		p = mp.get_context("spawn").Pool(params["numCams"])
+		#p.map_async(AcquireOneCamera,[(i, frame_queues[i], start_queues[i]) for i in range(params["numCams"])]).get()
+		p.starmap_async(AcquireOneCamera,[(i, frame_queues[i], start_queues[i]) for i in range(params["numCams"])]).get()
 
 	CloseSystems(systems, params)
 

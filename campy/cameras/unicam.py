@@ -124,7 +124,7 @@ def CountFPS(grabdata, frameNumber, timeStamp):
 			.format(grabdata["cameraName"], frameNumber, fpsCount, round(timeElapsed)))
 
 
-def GrabFrames(cam_params, writeQueue, dispQueue, stopReadQueue, stopWriteQueue):
+def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue):
 	# Open the camera object
 	cam, camera, cam_params = OpenCamera(cam_params, stopWriteQueue)
 
@@ -148,7 +148,7 @@ def GrabFrames(cam_params, writeQueue, dispQueue, stopReadQueue, stopWriteQueue)
 
 			# Append numpy array to writeQueue for writer to append to file
 			img = cam.GetImageArray(grabResult)
-			writeQueue.append(img)
+			#writeQueue.append(img)
 
 			# Append timeStamp and frameNumber to grabdata
 			frameNumber += 1
@@ -176,8 +176,8 @@ def GrabFrames(cam_params, writeQueue, dispQueue, stopReadQueue, stopWriteQueue)
 	# Close the camaera, save metadata, and tell writer and display to close
 	cam.CloseCamera(cam_params, camera)
 	SaveMetadata(cam_params, grabdata)
-	if not sys.platform=='win32' or not cam_params['cameraMake'] == 'basler':
-		dispQueue.append('STOP')
+	#if not sys.platform=='win32' or not cam_params['cameraMake'] == 'basler':
+	#	dispQueue.append('STOP')
 	stopWriteQueue.append('STOP')
 
 

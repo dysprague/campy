@@ -182,9 +182,6 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 				imresized = tf.image.resize(frame_use, size=[600,960], method='bilinear', preserve_aspect_ratio=False, antialias=False,)
 				imresized = tf.transpose(imresized, perm=[0,3,1,2])
 
-			#img = frame.astype(np.float32)
-			#writeQueue.append(img)
-
 			timeStamp = time.perf_counter() # frame acquisition time
 
 			#TODO: move img to tensorflow and convert to float32 before sending to processer
@@ -198,6 +195,9 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 			post_put_on_queue = time.perf_counter()
 
 			#CountFPS(grabdata, frameNumber, timeStamp)
+
+			img = frame.astype(np.float32)
+			writeQueue.append(img)
 
 			frameNumber += 1
 
@@ -229,12 +229,18 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 	SaveSimulation(n_cam, grabdata)
 	stopWriteQueue.append('STOP')
 
-def GrabFrames(cam_params, writeQueue, frameQueue, stopReadQueue, stopWriteQueue):
+def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue):
 	# Open the camera object
 	cam, camera, cam_params = OpenCamera(cam_params, stopWriteQueue)
 
 	# Create dictionary for appending frame number and timestamp information
 	grabdata = GrabData(cam_params)
+
+	print(f'Setup camera')
+
+	startQueue.get(block=True) #block until receive start signal from processing module
+
+	print('Start camera acquisition')
 
 	# Start grabbing frames from the camera
 	grabbing = StartGrabbing(camera, cam_params, cam)
@@ -245,12 +251,18 @@ def GrabFrames(cam_params, writeQueue, frameQueue, stopReadQueue, stopWriteQueue
 			# Grab image from camera buffer if available
 			grabResult = cam.GrabFrame(camera, frameNumber)
 
-			# Append numpy array to writeQueue for writer to append to file
-			img = cam.GetImageArray(grabResult)
-			writeQueue.append(img)
+			with tf.device('/GPU:0'):
+				#frame_use = frame/255
+				frame_use = tf.image.convert_image_dtype(grabResult.Array, tf.float32)
+				imresized = tf.image.resize(frame_use, size=[600,960], method='bilinear', preserve_aspect_ratio=False, antialias=False,)
+				imresized = tf.transpose(imresized, perm=[0,3,1,2])
 
 			#TODO: move img to tensorflow and convert to float32 before sending to processer
 			frameQueue.put(img)
+
+			# Append numpy array to writeQueue for writer to append to file
+			img = cam.GetImageArray(grabResult)
+			writeQueue.append(img)
 
 			# Append timeStamp and frameNumber to grabdata
 			frameNumber += 1

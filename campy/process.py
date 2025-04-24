@@ -142,7 +142,7 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
     framenumber = 0
 
     with tf.device('/GPU:0'):
-        gpu_tensor = tf.Variable(initial_value=tf.zeros((3, 3, 600, 960), dtype=tf.float32), trainable=False)
+        gpu_tensor = tf.Variable(initial_value=tf.zeros(img_shape, dtype=tf.float32), trainable=False)
 
     for sq in startQueues:
         sq.put("start")

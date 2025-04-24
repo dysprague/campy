@@ -32,12 +32,12 @@ def OpenSystems():
 	params = configurator.ConfigureParams()
 
 	# Load Camera Systems and Devices
-	#systems = unicam.LoadSystems(params)
-	systems = {}
-	#systems = unicam.GetDeviceList(systems, params)
+	systems = unicam.LoadSystems(params)
+	#systems = {}
+	systems = unicam.GetDeviceList(systems, params)
 
 	# Start camera triggers if configured
-	#systems = trigger.StartTriggers(systems, params)
+	systems = trigger.StartTriggers(systems, params)
 
 	return systems, params
 
@@ -47,8 +47,9 @@ def CloseSystems(systems, params):
 	unicam.CloseSystems(systems, params)
 
 
-def AcquireOneCamera(n_cam, frameQueue):
+def AcquireOneCamera(n_cam, frameQueue, startQueue):
 	# Initialize param dictionary for this camera stream
+	print('Enter AcquireOneCamera', flush=True)
 	cam_params = configurator.ConfigureCamParams(systems, params, n_cam)
 
 	# Initialize queues for display, video writer, and stop messages
@@ -56,12 +57,21 @@ def AcquireOneCamera(n_cam, frameQueue):
 	stopReadQueue = deque([],1)
 	stopWriteQueue = deque([],1)
 
+	print('Start acquisition trigger')
+
 	# Start grabbing frames ("producer" thread)
-	threading.Thread(
+	t = threading.Thread(
 		target = unicam.GrabFrames,
-daemon = True,
-		args = (cam_params, writeQueue, frameQueue, stopReadQueue, stopWriteQueue,),
-		).start()
+daemon = False,
+		args = (cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue,),
+		)
+	
+	t.start()
+	
+	try:
+		t.join()
+	except KeyboardInterrupt:
+		print('Keyboard interrupted acquisition')
 
 	# Start video file writer (main "consumer" process)
 	writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
@@ -88,8 +98,8 @@ daemon = False,
 	try:
 		t.join()  # or t.join(timeout) if you want to auto-exit eventually
 	except KeyboardInterrupt:
-		stop_event.set()
-		t.join()
+		print('Keyboard interrupted acquisition')
+		#t.join()
 
 	print('Finishing AcquireSimulation')
 
@@ -102,7 +112,7 @@ def Main():
 		'model_path':'./models/250421_183045.single_instance.n=8280.trt.FP32',
 		'buffer_size':20,
 		'num_keypoints':23,
-		'img_shape': (3,3,600,960),
+		'img_shape': (1,3,600,960),
 		'template': np.ones((20,23,3))
 	}
 
@@ -116,8 +126,11 @@ def Main():
 		processor.start()
 
 		procs = []
+
+		print(params["numCams"])
 		for i in range(params["numCams"]):
-			acq_proc = mp.Process(target=AcquireSimulation, args=(i, frame_queues[i], start_queues[i]))
+			print('Cam')
+			acq_proc = mp.Process(target=AcquireOneCamera, args=(i, frame_queues[i], start_queues[i]))
 			acq_proc.start()
 			procs.append(acq_proc)
 
@@ -129,13 +142,13 @@ def Main():
 		#p.map_async(AcquireOneCamera,[(i, frame_queues[i]) for i in range(params["numCams"])]).get()
 		#p.starmap_async(AcquireSimulation,[(i, frame_queues[i]) for i in range(params["numCams"])]).get()
 
-	print('Camera acquisition finished')
+		print('Camera acquisition finished')
 
-	stop_event.set()  # signal FrameProcessor to stop
-	print('Signaled stop event')
-	processor.join()  # wait for it to exit
+		stop_event.set()  # signal FrameProcessor to stop
+		print('Signaled stop event')
+		processor.join()  # wait for it to exit
 
-	#CloseSystems(systems, params)
+	CloseSystems(systems, params)
 
 # Open systems, creates global 'systems' and 'params' variables
 systems, params = OpenSystems()

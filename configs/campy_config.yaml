@@ -11,9 +11,9 @@ recTimeInSec: 30
 # Camera parameters
 numCams: 1
 cameraMake: "basler"
-cameraSettings: "./configs/rgb24.pfs"
-frameWidth: 1152
-frameHeight: 1024
+cameraSettings: "./configs/a2A1920-160ucBAS_40054255_10_22_2020.pfs"
+frameWidth: 1920
+frameHeight: 1200
 
 # Compression parameters
 gpuID: -1
@@ -27,4 +27,4 @@ ffmpegLogLevel: "warning"
 displayFrameRate: 10
 
 # Trigger parameters
-cameraTrigger: "software"
+#cameraTrigger: "software"

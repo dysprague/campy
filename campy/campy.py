@@ -103,7 +103,6 @@ def Main():
 		#p.starmap_async(AcquireOneCamera,range(params["numCams"])).get()
 
 		p = mp.get_context("spawn").Pool(params["numCams"])
-		#p.map_async(AcquireOneCamera,[(i, frame_queues[i], start_queues[i]) for i in range(params["numCams"])]).get()
 		p.starmap_async(AcquireOneCamera,[(i, frame_queues[i], start_queues[i]) for i in range(params["numCams"])]).get()
 
 	CloseSystems(systems, params)

@@ -155,7 +155,9 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
                         try:
                             with tf.device('/GPU:0'):
                                 data = tf.image.convert_image_dtype(ProcessQueues[cam].get(), tf.float32)
-                                gpu_tensor[cam].assign(data)
+                                gpu_tensor[0].assign(data)
+                                gpu_tensor[1].assign(data)
+                                gpu_tensor[2].assign(data)
                                 #print('Image taken from queue')
                             cam_frames[cam] = True
                             cam_frame_numbers[cam] +=1
@@ -184,7 +186,7 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
 
                 cam_frames = [False]*n_cams
 
-                if framenumber % 20 == 0:
+                if framenumber % 100 == 0:
                     print(f'Processed frame {framenumber}')
 
             time.sleep(0.001)

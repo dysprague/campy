@@ -87,20 +87,18 @@ def AcquireSimulation(n_cam, frameQueue, startQueue):
 	stopWriteQueue = deque([],1)
 
 	# Start grabbing frames ("producer" thread)
-	t = threading.Thread(
+	threading.Thread(
 		target = unicam.SimulateFrames,
 daemon = False,
 		args = (n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue, stop_event,),
-		)
+		).start()
 	
-	t.start()
-	
-	t.join()
-
-	print('Finishing AcquireSimulation')
 
 	# Start video file writer (main "consumer" process)
-	#writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
+	writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
+
+
+	print('Finishing AcquireSimulation')
 
 def Main():
 	process_params = {
@@ -108,7 +106,7 @@ def Main():
 		'model_path':'./models/250421_183045.single_instance.n=8280.trt.FP32',
 		'buffer_size':20,
 		'num_keypoints':23,
-		'img_shape': (1,3,600,960),
+		'img_shape': (3,3,600,960),
 		'template': np.ones((20,23,3))
 	}
 

@@ -71,13 +71,13 @@ daemon = False,
 	
 	t.start()
 	
-	try:
-		t.join()
-	except KeyboardInterrupt:
-		print('Keyboard interrupted acquisition')
+	#try:
+	#	t.join()
+	#except KeyboardInterrupt:
+	#		print('Keyboard interrupted acquisition')
 
 	# Start video file writer (main "consumer" process)
-	#writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
+	writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
 
 
 def Main():
@@ -104,6 +104,7 @@ def Main():
 
 		p = mp.get_context("spawn").Pool(params["numCams"])
 		p.starmap_async(AcquireOneCamera,[(i, frame_queues[i], start_queues[i]) for i in range(params["numCams"])]).get()
+		print('Finished AcquireOneCamera')
 
 	CloseSystems(systems, params)
 

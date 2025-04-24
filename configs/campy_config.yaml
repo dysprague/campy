@@ -6,7 +6,7 @@
 videoFolder: "./test"
 videoFilename: "0.mp4"
 frameRate: 20
-recTimeInSec: 1
+recTimeInSec: 10
 
 # Camera parameters
 numCams: 1

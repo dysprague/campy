@@ -74,7 +74,7 @@ daemon = False,
 		print('Keyboard interrupted acquisition')
 
 	# Start video file writer (main "consumer" process)
-	writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
+	#writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
 
 def AcquireSimulation(n_cam, frameQueue, startQueue):
 	# Initialize param dictionary for this camera stream
@@ -94,12 +94,8 @@ daemon = False,
 		)
 	
 	t.start()
-
-	try:
-		t.join()  # or t.join(timeout) if you want to auto-exit eventually
-	except KeyboardInterrupt:
-		print('Keyboard interrupted acquisition')
-		#t.join()
+	
+	t.join()
 
 	print('Finishing AcquireSimulation')
 
@@ -121,32 +117,32 @@ def Main():
 	start_queues = [manager.Queue(maxsize=10) for _ in range(params["numCams"])]
 	
 	with HandleKeyboardInterrupt():
-		stop_event = mp.Event()
-		processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, start_queues, stop_event,))
-		processor.start()
+		#stop_event = mp.Event()
+		#processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, start_queues, stop_event,))
+		#processor.start()
 
-		procs = []
+		#procs = []
 
-		print(params["numCams"])
-		for i in range(params["numCams"]):
-			print('Cam')
-			acq_proc = mp.Process(target=AcquireOneCamera, args=(i, frame_queues[i], start_queues[i]))
-			acq_proc.start()
-			procs.append(acq_proc)
+		#print(params["numCams"])
+		#for i in range(params["numCams"]):
+		#	print('Cam')
+		#	acq_proc = mp.Process(target=AcquireOneCamera, args=(i, frame_queues[i], start_queues[i]))
+		#	acq_proc.start()
+		#	procs.append(acq_proc)
 
-		for proc in procs:
-			proc.join()
+		#for proc in procs:
+		#	proc.join()
 
 		# Acquire cameras in parallel with Windows- and Linux-compatible pool
-		#p = mp.get_context("spawn").Pool(params["numCams"])
-		#p.map_async(AcquireOneCamera,[(i, frame_queues[i]) for i in range(params["numCams"])]).get()
-		#p.starmap_async(AcquireSimulation,[(i, frame_queues[i]) for i in range(params["numCams"])]).get()
+		p = mp.get_context("spawn").Pool(params["numCams"])
+		#p.map_async(AcquireOneCamera,[(i, frame_queues[i], start_queues[i]) for i in range(params["numCams"])]).get()
+		p.starmap_async(AcquireOneCamera,[(i, frame_queues[i], start_queues[i]) for i in range(params["numCams"])]).get()
 
 		print('Camera acquisition finished')
 
-		stop_event.set()  # signal FrameProcessor to stop
-		print('Signaled stop event')
-		processor.join()  # wait for it to exit
+	#stop_event.set()  # signal FrameProcessor to stop
+	print('Signaled stop event')
+	#processor.join()  # wait for it to exit
 
 	CloseSystems(systems, params)
 

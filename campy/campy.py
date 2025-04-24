@@ -48,6 +48,8 @@ def AcquireOneCamera(n_cam):
 	print(systems)
 	cam_params = configurator.ConfigureCamParams(systems, params, n_cam)
 
+	print('Configured camera')
+
 	# Initialize queues for display, video writer, and stop messages
 	dispQueue = deque([], 2)
 	writeQueue = deque()
@@ -55,11 +57,11 @@ def AcquireOneCamera(n_cam):
 	stopWriteQueue = deque([],1)
 
 	# Start image window display thread
-	threading.Thread(
-		target = display.DisplayFrames,
-		daemon = True,
-		args = (cam_params, dispQueue,),
-		).start()
+	#threading.Thread(
+	#	target = display.DisplayFrames,
+	#	daemon = True,
+	#	args = (cam_params, dispQueue,),
+	#	).start()
 
 	# Start grabbing frames ("producer" thread)
 	threading.Thread(
@@ -74,9 +76,21 @@ def AcquireOneCamera(n_cam):
 
 def Main():
 	with HandleKeyboardInterrupt():
+		procs = []
+
+		print(params["numCams"])
+		for i in range(params["numCams"]):
+			print('Cam')
+			acq_proc = mp.Process(target=AcquireOneCamera, args=[i])
+			acq_proc.start()
+			procs.append(acq_proc)
+
+		for proc in procs:
+			proc.join()
+
 		# Acquire cameras in parallel with Windows- and Linux-compatible pool
-		p = mp.get_context("spawn").Pool(params["numCams"])
-		p.map_async(AcquireOneCamera,range(params["numCams"])).get()
+		#p = mp.get_context("spawn").Pool(params["numCams"])
+		#p.map_async(AcquireOneCamera,range(params["numCams"])).get()
 
 	CloseSystems(systems, params)
 

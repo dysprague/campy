@@ -37,7 +37,9 @@ def LoadSystems(params):
 
 def LoadDevice(systems, params, cam_params):
 	try:
+		print(cam_params)
 		cam = ImportCam(cam_params["cameraMake"])
+		print('cam imported')
 		cam_params = cam.LoadDevice(systems, params, cam_params)
 	except Exception as e:
 		logging.error('Caught exception at camera/unicam.py LoadSystems. Check cameraMake: {}'.format(e))
@@ -125,6 +127,8 @@ def CountFPS(grabdata, frameNumber, timeStamp):
 def GrabFrames(cam_params, writeQueue, dispQueue, stopReadQueue, stopWriteQueue):
 	# Open the camera object
 	cam, camera, cam_params = OpenCamera(cam_params, stopWriteQueue)
+
+	print('Camera opened')
 
 	# Use Basler's default display window on Windows. Not supported on Linux
 	#if sys.platform=='win32' and cam_params["cameraMake"] == 'basler':

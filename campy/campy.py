@@ -19,8 +19,7 @@ campy-acquire ./configs/campy_config.yaml
 import os, time, sys, logging, threading, queue
 from collections import deque
 import multiprocessing as mp
-#from campy import writer, display, configurator
-from campy import writer, configurator
+from campy import writer, display, configurator
 from campy.trigger import trigger
 from campy.cameras import unicam
 from campy.utils.utils import HandleKeyboardInterrupt
@@ -56,11 +55,11 @@ def AcquireOneCamera(n_cam):
 	stopWriteQueue = deque([],1)
 
 	# Start image window display thread
-	#threading.Thread(
-	#	target = display.DisplayFrames,
-	#	daemon = True,
-	#	args = (cam_params, dispQueue,),
-	#	).start()
+	threading.Thread(
+		target = display.DisplayFrames,
+		daemon = True,
+		args = (cam_params, dispQueue,),
+		).start()
 
 	# Start grabbing frames ("producer" thread)
 	threading.Thread(

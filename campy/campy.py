@@ -117,9 +117,9 @@ def Main():
 	start_queues = [manager.Queue(maxsize=10) for _ in range(params["numCams"])]
 	
 	with HandleKeyboardInterrupt():
-		#stop_event = mp.Event()
-		#processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, start_queues, stop_event,))
-		#processor.start()
+		stop_event = mp.Event()
+		processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, start_queues, stop_event,))
+		processor.start()
 
 		#procs = []
 
@@ -140,9 +140,9 @@ def Main():
 
 		print('Camera acquisition finished')
 
-	#stop_event.set()  # signal FrameProcessor to stop
+	stop_event.set()  # signal FrameProcessor to stop
 	print('Signaled stop event')
-	#processor.join()  # wait for it to exit
+	processor.join()  # wait for it to exit
 
 	CloseSystems(systems, params)
 

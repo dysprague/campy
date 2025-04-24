@@ -152,12 +152,11 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
             for cam in np.arange(n_cams):
                 if cam_frames[cam] is False:
                     if not ProcessQueues[cam].empty():
-                        print(ProcessQueues[cam].qsize)
                         try:
                             with tf.device('/GPU:0'):
                                 data = tf.image.convert_image_dtype(ProcessQueues[cam].get(), tf.float32)
                                 gpu_tensor[cam].assign(data)
-                                print('Image taken from queue')
+                                #print('Image taken from queue')
                             cam_frames[cam] = True
                             cam_frame_numbers[cam] +=1
                         except Exception as e:
@@ -185,7 +184,7 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
 
                 cam_frames = [False]*n_cams
 
-                if framenumber % 10 == 0:
+                if framenumber % 20 == 0:
                     print(f'Processed frame {framenumber}')
 
             time.sleep(0.001)

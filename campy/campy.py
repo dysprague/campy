@@ -68,13 +68,13 @@ daemon = False,
 	
 	t.start()
 	
-	try:
-		t.join()
-	except KeyboardInterrupt:
-		print('Keyboard interrupted acquisition')
+	#try:
+	#	t.join()
+	#except KeyboardInterrupt:
+	#	print('Keyboard interrupted acquisition')
 
 	# Start video file writer (main "consumer" process)
-	#writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
+	writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
 
 def AcquireSimulation(n_cam, frameQueue, startQueue):
 	# Initialize param dictionary for this camera stream

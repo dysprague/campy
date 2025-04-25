@@ -262,7 +262,7 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 
 			# Append numpy array to writeQueue for writer to append to file
 			#img = cam.GetImageArray(grabResult)
-			#writeQueue.append(img)
+			writeQueue.append(img)
 			# Append timeStamp and frameNumber to grabdata
 			frameNumber += 1
 

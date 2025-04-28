@@ -228,7 +228,8 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
 
                 peaks, peak_vals = find_global_peaks_rough(tf.transpose(output, perm=[0,2,3,1])) #peaks: 3x2x23
 
-                
+                peaks_numpy = peaks.numpy()
+                peak_vals = peak_vals.numpy()
 
                 #TODO: resize peak values to fit onto original image (see SLEAP example)
                 #keypoints_3D = triangulate(output)

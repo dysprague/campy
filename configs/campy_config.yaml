@@ -3,14 +3,15 @@
 # using ffmpeg's X264 codec
 
 # Recording parameters
-videoFolder: "./test"
+videoFolder: "./test/2025_04_25"
 videoFilename: "0.mp4"
-frameRate: 20
-recTimeInSec: 30
+frameRate: 10
+recTimeInSec: 20
 
 # Camera parameters
-numCams: 1
+numCams: 3
 cameraMake: "basler"
+cameraNames: ['Camera0', 'Camera1', 'Camera2']
 cameraSettings: "./configs/a2A1920-160ucBAS_40054255_10_22_2020.pfs"
 frameWidth: 1920
 frameHeight: 1200
@@ -28,3 +29,6 @@ displayFrameRate: 10
 
 # Trigger parameters
 #cameraTrigger: "Line2"
+#startArduino: True
+#serialPort: "COM3"
+#digitalPins: [9]

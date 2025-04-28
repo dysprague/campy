@@ -116,6 +116,17 @@ def StartGrabbing(camera, cam_params, cam):
 		print(cam_params["cameraName"], "ready to trigger.")
 	return grabbing
 
+def convert_rgb_to_bgr(image: tf.Tensor) -> tf.Tensor:
+    """Convert an RGB image to BGR format by reversing the channel order.
+
+    Args:
+        image: Tensor of any dtype with shape (..., 3) in RGB format. If grayscale, the
+            image will be converted to RGB first.
+
+    Returns:
+        The input image with the channels axis reversed.
+    """
+    return tf.reverse(image, axis=[-1])
 
 def CountFPS(grabdata, frameNumber, timeStamp):
 	if frameNumber % grabdata["chunkLengthInFrames"] == 0:
@@ -180,7 +191,8 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 				#frame_use = frame/255
 				frame_use = tf.image.convert_image_dtype(frame, tf.float32)
 				imresized = tf.image.resize(frame_use, size=[600,960], method='bilinear', preserve_aspect_ratio=False, antialias=False,)
-				imresized = tf.transpose(imresized, perm=[0,3,1,2])
+				imbgr = convert_rgb_to_bgr(imresized)
+				imtranspose = tf.transpose(imbgr, perm=[0,3,1,2])
 
 			timeStamp = time.perf_counter() # frame acquisition time
 
@@ -190,7 +202,7 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 			#	gpu_tensor = tf.convert_to_tensor(img)
 			#gpu_tensor = tf.cast(gpu_tensor, tf.float32)
 			
-			frameQueue.put(imresized)
+			frameQueue.put(imtranspose)
 
 			post_put_on_queue = time.perf_counter()
 
@@ -229,6 +241,42 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 	SaveSimulation(n_cam, grabdata)
 	stopWriteQueue.append('STOP')
 
+def resize_image(image: tf.Tensor, scale: tf.Tensor) -> tf.Tensor:
+    """Rescale an image by a scale factor.
+
+    This function is primarily a convenience wrapper for `tf.image.resize` that
+    calculates the new shape from the scale factor.
+
+    Args:
+        image: Single image tensor of shape (height, width, channels).
+        scale: Factor to resize the image dimensions by, specified as either a float
+            scalar or as a 2-tuple of [scale_x, scale_y]. If a scalar is provided, both
+            dimensions are resized by the same factor.
+
+    Returns:
+        The resized image tensor of the same dtype but scaled height and width.
+
+    See also: tf.image.resize
+    """
+    height = tf.shape(image)[-3]
+    width = tf.shape(image)[-2]
+    new_size = tf.reverse(
+        tf.cast(
+            tf.cast([width, height], tf.float32) * tf.cast(scale, tf.float32), tf.int32
+        ),
+        [0],
+    )
+    return tf.cast(
+        tf.image.resize(
+            image,
+            size=new_size,
+            method="bilinear",
+            preserve_aspect_ratio=False,
+            antialias=False,
+        ),
+        image.dtype,
+    )
+
 def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue):
 	# Open the camera object
 	cam, camera, cam_params = OpenCamera(cam_params, stopWriteQueue)
@@ -256,9 +304,10 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 			with tf.device('/CPU:0'):
 				#frame_use = frame/255
 				#frame_use = tf.image.convert_image_dtype(grabResult.Array, tf.float32)
-				imresized = tf.image.resize(img, size=[600,960], method='bilinear', preserve_aspect_ratio=False, antialias=False,)
-				imresized = tf.transpose(imresized, perm=[2,0,1])
-			frameQueue.put(imresized)
+				#imresized = tf.cast(tf.image.resize(img, size=[600,960], method='bilinear', preserve_aspect_ratio=False, antialias=False,), img.dtype)
+				imresized = resize_image(img, 0.5)
+				imtranspose = tf.transpose(imresized, perm=[2,0,1])
+			frameQueue.put(imtranspose)
 
 			# Append numpy array to writeQueue for writer to append to file
 			#img = cam.GetImageArray(grabResult)

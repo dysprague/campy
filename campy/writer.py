@@ -146,14 +146,18 @@ def WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue):
 	with QueueKeyboardInterrupt(readQueue):
 		# Write until interrupted and/or stop message received
 		while(writing):
-			if writeQueue:
-				writer.send(writeQueue.popleft())
-			else:
+			frame = writeQueue.get()
+			if frame is None:
+				break 
+			writer.send(frame)
+			#if writeQueue:
+			#	writer.send(writeQueue.get())
+			#else:
 				# Once queue is depleted and grabber stops, then stop writing
-				if stopWriteQueue:
-					writing = False
+			#	if stopWriteQueue:
+			#		writing = False
 				# Otherwise continue writing
-				time.sleep(0.01)
+			time.sleep(0.01)
 
 	# Close up...
 	print("Closing video writer for {}. Please wait...".format(cam_params["cameraName"]))

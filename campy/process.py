@@ -180,11 +180,10 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
 
     print('Model loaded')
 
-    trace_data = np.ones(img_shape)
+    with tf.device('/GPU:0'):
+        gpu_tensor = tf.Variable(initial_value=tf.zeros(img_shape, dtype=tf.float32), trainable=False)
 
-    trace_data = trace_data.astype(np.float32)
-
-    model.predict(trace_data) #initialize graph
+    model.predict(gpu_tensor) #initialize graph
 
     print('Model loaded and initialized')
 
@@ -197,8 +196,7 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
 
     framenumber = 0
 
-    with tf.device('/GPU:0'):
-        gpu_tensor = tf.Variable(initial_value=tf.zeros(img_shape, dtype=tf.float32), trainable=False)
+   
 
     for sq in startQueues:
         sq.put("start")

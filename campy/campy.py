@@ -53,7 +53,7 @@ def AcquireOneCamera(n_cam, frameQueue, startQueue):
 	cam_params = configurator.ConfigureCamParams(systems, params, n_cam)
 
 	# Initialize queues for display, video writer, and stop messages
-	writeQueue = deque()
+	writeQueue = queue.Queue(maxsize=100)
 	stopReadQueue = deque([],1)
 	stopWriteQueue = deque([],1)
 
@@ -82,14 +82,16 @@ def AcquireSimulation(n_cam, frameQueue, startQueue):
 	cam_params = params
 
 	# Initialize queues for display, video writer, and stop messages
-	writeQueue = deque()
+	writeQueue = queue.Queue(maxsize=100)
 	stopReadQueue = deque([],1)
 	stopWriteQueue = deque([],1)
+
+	print(type(writeQueue))
 
 	# Start grabbing frames ("producer" thread)
 	threading.Thread(
 		target = unicam.SimulateFrames,
-daemon = False,
+daemon = True,
 		args = (n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue, stop_event,),
 		).start()
 	
@@ -116,8 +118,8 @@ def Main():
 	
 	with HandleKeyboardInterrupt():
 		stop_event = mp.Event()
-		processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, start_queues, stop_event,))
-		processor.start()
+		#processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, start_queues, stop_event,))
+		#processor.start()
 
 		#procs = []
 
@@ -140,7 +142,7 @@ def Main():
 
 	stop_event.set()  # signal FrameProcessor to stop
 	print('Signaled stop event')
-	processor.join()  # wait for it to exit
+	#processor.join()  # wait for it to exit
 
 	CloseSystems(systems, params)
 

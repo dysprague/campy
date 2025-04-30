@@ -286,7 +286,7 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 
 	print(f'Setup camera')
 
-	startQueue.get(block=True) #block until receive start signal from processing module
+	#startQueue.get(block=True) #block until receive start signal from processing module
 
 	print('Start camera acquisition')
 
@@ -298,20 +298,19 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 		try:
 			# Grab image from camera buffer if available
 			grabResult = cam.GrabFrame(camera, frameNumber)
-
 			img = cam.GetImageArray(grabResult)
 
-			with tf.device('/CPU:0'):
+			#with tf.device('/CPU:0'):
 				#frame_use = frame/255
 				#frame_use = tf.image.convert_image_dtype(grabResult.Array, tf.float32)
 				#imresized = tf.cast(tf.image.resize(img, size=[600,960], method='bilinear', preserve_aspect_ratio=False, antialias=False,), img.dtype)
-				imresized = resize_image(img, 0.5)
-				imtranspose = tf.transpose(imresized, perm=[2,0,1])
-			frameQueue.put(imtranspose)
+			#	imresized = resize_image(img, 0.5)
+			#	imtranspose = tf.transpose(imresized, perm=[2,0,1])
+			#frameQueue.put(imtranspose)
 
 			# Append numpy array to writeQueue for writer to append to file
 			#img = cam.GetImageArray(grabResult)
-			writeQueue.append(img)
+			writeQueue.put(img)
 			# Append timeStamp and frameNumber to grabdata
 			frameNumber += 1
 
@@ -336,7 +335,7 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 				logging.error('Caught exception at cameras/unicam.py GrabFrames: {}'.format(e))
 			time.sleep(0.001)
 
-		
+	writeQueue.put(None)
 
 	# Close the camaera, save metadata, and tell writer and display to close
 	cam.CloseCamera(cam_params, camera)

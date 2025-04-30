@@ -205,6 +205,8 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
 
     while not stop_event.is_set():
         try: 
+            #TODO: parallelize reads from camera acquisition queue
+            #TODO: Handle cases of dropped frames
             for cam in np.arange(n_cams):
                 if cam_frames[cam] is False:
                     if not ProcessQueues[cam].empty():

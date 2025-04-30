@@ -20,7 +20,7 @@ import os, time, sys, logging, threading, queue
 from collections import deque
 import numpy as np
 import multiprocessing as mp
-from campy import writer, display, configurator, process
+from campy import writer, display, configurator, process, behavior
 from campy.trigger import trigger
 from campy.cameras import unicam
 from campy.utils.utils import HandleKeyboardInterrupt
@@ -112,26 +112,22 @@ def Main():
 		'template': np.ones((20,23,3))
 	}
 
+	behavior_params = {
+		
+	}
+
 	manager = mp.Manager()
 	frame_queues = [manager.Queue(maxsize=10) for _ in range(params["numCams"])]
 	start_queues = [manager.Queue(maxsize=10) for _ in range(params["numCams"])]
+	behavior_queue = manager.Queue(maxsize=10)
 	
 	with HandleKeyboardInterrupt():
 		stop_event = mp.Event()
 		#processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, start_queues, stop_event,))
 		#processor.start()
 
-		#procs = []
-
-		#print(params["numCams"])
-		#for i in range(params["numCams"]):
-		#	print('Cam')
-		#	acq_proc = mp.Process(target=AcquireOneCamera, args=(i, frame_queues[i], start_queues[i]))
-		#	acq_proc.start()
-		#	procs.append(acq_proc)
-
-		#for proc in procs:
-		#	proc.join()
+		behavior = mp.Process(target=behavior.ProcessBehavior, args=(behavior_params, behavior_queue, stop_event))
+		behavior.start()
 
 		# Acquire cameras in parallel with Windows- and Linux-compatible pool
 		p = mp.get_context("spawn").Pool(params["numCams"])
@@ -142,9 +138,23 @@ def Main():
 
 	stop_event.set()  # signal FrameProcessor to stop
 	print('Signaled stop event')
-	#processor.join()  # wait for it to exit
+	behavior.join()
+	processor.join()  # wait for it to exit
 
 	CloseSystems(systems, params)
 
 # Open systems, creates global 'systems' and 'params' variables
 systems, params = OpenSystems()
+
+
+#procs = []
+
+#print(params["numCams"])
+#for i in range(params["numCams"]):
+#	print('Cam')
+#	acq_proc = mp.Process(target=AcquireOneCamera, args=(i, frame_queues[i], start_queues[i]))
+#	acq_proc.start()
+#	procs.append(acq_proc)
+
+#for proc in procs:
+#	proc.join()

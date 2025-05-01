@@ -163,7 +163,7 @@ def SaveMetadata(process_params, processdata):
     x = np.array([processdata['frameNumber'], processdata['timeStamp'], processdata['frameProcessTime']])
     np.save(npy_filename,x)
 
-def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
+def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, stop_event):
 
     disable_preallocation()
 
@@ -171,10 +171,8 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
 
     n_cams = process_params['n_cams']
     model_path = process_params['model_path']
-    buffer_size = process_params['buffer_size']
     n_keypoints = process_params['num_keypoints']
     img_shape = process_params['img_shape']
-    template = process_params['template']
 
     model = OptimizedModel(model_path)
 
@@ -190,13 +188,11 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
     cam_frames = [False]*n_cams
     cam_frame_numbers = [0,0,0]
 
-    behavior = BehaviorBuffer(buffer_size, n_keypoints, 3, template)
+    #behavior = BehaviorBuffer(buffer_size, n_keypoints, 3, template)
 
     processdata = ProcessData()
 
     framenumber = 0
-
-   
 
     for sq in startQueues:
         sq.put("start")
@@ -226,15 +222,15 @@ def ProcessFrames(process_params, ProcessQueues, startQueues, stop_event):
                 pre_predict = time.perf_counter()
                 output = model.predict(gpu_tensor)
 
-                peaks, peak_vals = find_global_peaks_rough(tf.transpose(output, perm=[0,2,3,1])) #peaks: 3x2x23
+                peaks, peak_vals = find_global_peaks_rough(tf.transpose(output, perm=[0,2,3,1])) #peaks: 3x23x2
 
                 peaks_numpy = peaks.numpy()
                 peak_vals = peak_vals.numpy()
 
-                #TODO: resize peak values to fit onto original image (see SLEAP example)
-                #keypoints_3D = triangulate(output)
+                peaks_numpy = peaks_numpy * 4 # Change based on input scaling and output stride
+                peaks_numpy = (peaks_numpy / 0.5) + 0.5
 
-                #behavior.append(keypoints_3D)
+                BehaviorQueue.put((peaks_numpy, peak_vals))
 
                 #trigger_reward = behavior.compare_template()
 

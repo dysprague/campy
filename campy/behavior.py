@@ -1,4 +1,11 @@
 
+import numpy as np
+import scipy.io as sio
+
+from numpy.lib.format import open_memmap
+import cv2
+
+
 class BehaviorRecognizer:
     """
     Compares processed keypoint readings (already projected into D-dimensional space)
@@ -40,34 +47,83 @@ class BehaviorRecognizer:
         return scalar_diff, per_dim_diff, data_arr
 
 
-def process_keypoints(BehavRec, markers, PCA_mat, num_PCs): #PCA matrix is 
-    # --- Step 2: Egocentric Alignment ---
-    # Define SpineF and SpineM indices according to MATLAB (1-indexed) to Python (0-indexed) mapping:
-    #   SpineF = markers(:,:,4) -> Python index 3 -> double check these are the same
-    #   SpineM = markers(:,:,5) -> Python index 4
-    SpineF = markers[3, :]  # shape: (1, 3)
-    SpineM = markers[4, :]  # shape: (1, 3)
+def normalize_skeleton(points_3d):
 
-    rotangle = np.arctan2( -(SpineF[:, 1] - SpineM[:, 1]), (SpineF[:, 0] - SpineM[:, 0]) )
+    SpineF = points_3d[3,:]  # shape: (n_frames, 3)
+    SpineM = points_3d[4, :]  # shape: (n_frames, 3)
+
+    rotangle = np.arctan2( -(SpineF[1] - SpineM[1]), (SpineF[0] - SpineM[0]) )
 
     global_rotmat = np.zeros((2, 2))
 
-    global_rotmatrix[0, 0] = np.cos(rotangle)
-    global_rotmatrix[0, 1] = -np.sin(rotangle)
-    global_rotmatrix[1, 0] = np.sin(rotangle)
-    global_rotmatrix[1, 1] = np.cos(rotangle) 
+    global_rotmat[0, 0] = np.cos(rotangle)
+    global_rotmat[0, 1] = -np.sin(rotangle)
+    global_rotmat[1, 0] = np.sin(rotangle)
+    global_rotmat[1, 1] = np.cos(rotangle) 
 
-    markers_centered = markers - markers[4,:] @
+    markers_centered = points_3d - points_3d[4,:] #23x3
 
-    markers_rotated = markers_aligned
+    markers_rotated = markers_centered 
+    markers_rotated[:,:2] = np.transpose(global_rotmat @ np.transpose(markers_rotated[:,:2]))
 
-    markers_rotated[] = global_rotmatrix.dot
+    return markers_rotated
 
-    return keypoints_3D #TODO: return PCA decomposition of keypoint
+def undistort_points(points, K, dist_coeffs):
+    """
+    points: (N,2) array of pixel coordinates in one image
+    K: (3,3) intrinsic matrix
+    dist_coeffs: vector [k1,k2,p1,p2,(k3,…)] as OpenCV expects
+    returns: (N,2) of normalized coordinates x',y' satisfying
+             [x', y', 1]^T ∝ K^{-1} [u,v,1]^T after removing distortion
+    """
+    # OpenCV’s undistortPoints returns normalized coordinates if you omit P
+    pts = points.reshape(-1,1,2).astype(np.float64)
+    undist = cv2.undistortPoints(pts, K, dist_coeffs)  
+    return undist.reshape(-1,2)
 
-def triangulate(keypoints_2D):
+def build_projection_matrix(K, R, t):
+    """Returns the 3×4 projection matrix P = K [R | t]."""
+    return np.identity(3) @ np.hstack((R, t.reshape(3,1))) # Use identity for K because undistort already uses camera intrinsics
 
-    return keypoints_2D #TODO: implement triangulation code based on camera calibrations
+def triangulate_point_multiview(undist_points, P_list):
+    """
+    undist_points: list of (xi, yi) normalized coords, one per camera
+    P_list:       list of corresponding 3×4 projection matrices
+    returns:      X (3,) inhomogeneous 3D point
+    """
+    m = len(P_list)
+    A = np.zeros((2*m, 4), dtype=np.float64)
+    for i, ((x, y), P) in enumerate(zip(undist_points, P_list)):
+        A[2*i    ] = x * P[2] - P[0]
+        A[2*i + 1] = y * P[2] - P[1]
+
+    # Solve A X = 0 via SVD:
+    _, _, Vt = np.linalg.svd(A)
+    X_homog = Vt[-1]        # last row of V^T
+    X_homog /= X_homog[3]   # de-homogenize
+    return X_homog[:3]
+
+
+def triangulate(keypoints_2D, P_list, dist_coefs, K_list): #keys 3D is n_camsx23x2
+
+    keypoints_2D[:,:,1] = 1200 - keypoints_2D[:,:,1] # Flip y vals
+    
+    undist_pts = np.zeros(keypoints_2D.shape) # n_cams x n_keypoints x 2
+
+    points_3d = np.zeros((keypoints_2D.shape[1], 3))
+
+    for i in range(keypoints_2D.shape[0]):
+        undist_pts[i,:,:] = undistort_points(keypoints_2D[i,:,:], K_list[i], dist_coefs[i])
+
+    for j in range(keypoints_2D.shape[1]):
+        uv_list = undist_pts[:,j,:] 
+        points_3d[i,:] = triangulate_point_multiview(uv_list, P_list)
+
+    return points_3d, dist_pts
+    
+
+def correct_triangulations(points_3d, P_list, undist_pts, edges, bone_length_avg, w_bone=1.0):
+    return points_3d #TODO: add triangulation corrections
 
 
 
@@ -82,16 +138,62 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
     print('Initializing behavior module')
 
     cam_calibration_path = behavior_params["calibration_path"]
-    template_path = behavior_params["template_path"]
-    PCA_path = behavior_params["PCA_path"]
+    calibration_files = behavior_params["calibration_files"]
+    skel_file = behavior_params["skeleton"]
+    edge_lengths = behavior_params['edge_lengths']
+    max_frames = behavior_params["numImagesToGrab"]
+    n_cams = behavior_params['n_cams']
+    save_path = behavior_params['save_path']
 
-    cam_calbration = sio.loadmat(cam_calibration_path, simplify_cells=True)
-    template = sio.loadmat(tempate_path, simplify_cells=True)
-    PCA_mat = sio.loadmat(PCA_path, simplify_cells=True)
+    skel_label = sio.loadmat(skel_file, simplify_cells=True)
+    labels = skel_label['RP2']
 
-    num_PCs = template.shape[1]
+    skeleton = skel_label['skeleton']
+    # skeleton
+    nodes = skeleton['joint_names']
+    nodes = list(map(str, nodes))
 
-    BehavRec = BehaviorRecognizer(template, num_PCs)
+    edges = skeleton['joints_idx']-1 # python indexing
+
+    cam_extrinsics = []
+
+    for file in calibration_files:
+        params = sio.loadmat(file, simplify_cells=True)
+
+        cam_extrinsics.append({'K':params['K'], 'RDistort':params['RDistort'], 'TDistort':params['TDistort'], 'r':params['r'], 't':params['t']})
+
+    P_list = []
+    dist_coefs = []
+    K_list = []
+
+    for cam_vals in cam_extrinsics:
+        K = np.transpose(cam_vals['K'])
+        r = np.transpose(cam_vals['r'])
+        t = -cam_vals['t']
+        Rdist = cam_vals['RDistort']
+        Tdist = cam_vals['TDistort']
+        P_list.append(build_projection_matrix(K,r,t))
+        K_list.append(K)
+        dist_coefs.append([Rdist[0], Rdist[1], Tdist[0], Tdist[1]])
+
+
+    #template_path = behavior_params["template_path"]
+    #PCA_path = behavior_params["PCA_path"]
+
+    #cam_calbration = sio.loadmat(cam_calibration_path, simplify_cells=True)
+    #template = sio.loadmat(tempate_path, simplify_cells=True)
+    #PCA_mat = sio.loadmat(PCA_path, simplify_cells=True)
+
+    mm_peaks_and_vals = open_memmap(f'{save_path}/sleap_keys_2D.npy', mode='w+',
+                           dtype=np.float64,
+                           shape = (max_frames, n_cams, 23, 3)) # xy positions of keypoints from each camera and peak_val confidence levels
+    mm_keys_3D = open_memmap(f'{save_path}/triang_keys_3D.npy', mode='w+',
+                             dtype=np.float64,
+                             shape = (max_frames, 23, 3))
+
+    #num_PCs = template.shape[1]
+
+    #BehavRec = BehaviorRecognizer(template, num_PCs)
 
     print("Behavior analysis module initialized and ready")
 
@@ -102,13 +204,26 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
             keypoints_2D, peak_vals  = BehaviorQueue.get() # 3x23x2, 3x23 matrices of peak locations and confidence
             # Queue get is blocking if empty
 
-            keypoints_3D = triangulate(keypoints_2D, peak_vals, cam_calibration)
+            mm_peaks_and_vals[frameNumber, :,:,:2] = keypoints_2D 
+            mm_peaks_and_vals[frameNumber, :,:,2] = peak_vals
 
-            behav_PCA = process_keypoints(keypoints_3D, PCA_mat, num_PCs) # Produces num_pcs x1 vector
+            keypoints_3D = triangulate(keypoints_2D, P_list, dist_coefs, K_list)
 
-            BehavRec.update(behav_PCA)
+            #TODO: add triangulation correction
 
-            #TODO: Save keypoints
+            mm_keys_3D[frameNumber] = keypoints_3D
+
+            points_rotated = normalize_skeleton(keypoints_3D)
+
+            if (frameNumber%100) == 0:
+                mm_peaks_and_vals.flush()
+                mm_keys_3D.flush()
+
+            frameNumber += 1
+
+            #behav_PCA = process_keypoints(keypoints_3D, PCA_mat, num_PCs) # Produces num_pcs x1 vector
+
+            #BehavRec.update(behav_PCA)
 
 
         except Exception as e:

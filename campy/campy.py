@@ -67,11 +67,6 @@ daemon = False,
 		)
 	
 	t.start()
-	
-	#try:
-	#	t.join()
-	#except KeyboardInterrupt:
-	#	print('Keyboard interrupted acquisition')
 
 	# Start video file writer (main "consumer" process)
 	writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
@@ -106,14 +101,17 @@ def Main():
 	process_params = {
 		'n_cams':params["numCams"],
 		'model_path':'./models/250421_183045.single_instance.n=8280.trt.FP32',
-		'buffer_size':20,
 		'num_keypoints':23,
-		'img_shape': (3,3,600,960),
-		'template': np.ones((20,23,3))
+		'img_shape': (2,3,600,960), # numCams x RGB x height x width
 	}
 
 	behavior_params = {
-		
+		'calibration_path': './extrinsics',
+		'calibration_files': [],
+		'skeleton': 'path to skeleton',
+		'edge_lengths':[],
+		'numImagesToGrab': int(round(params["recTimeInSec"]*params["frameRate"])),
+		'n_cams': params["numCams"]
 	}
 
 	manager = mp.Manager()
@@ -123,20 +121,21 @@ def Main():
 	
 	with HandleKeyboardInterrupt():
 		stop_event = mp.Event()
-		#processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, start_queues, stop_event,))
-		#processor.start()
+		processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, behavior_queue, start_queues, stop_event,))
+		processor.start()
 
-		behavior = mp.Process(target=behavior.ProcessBehavior, args=(behavior_params, behavior_queue, stop_event))
+		behavior = mp.Process(target=behavior.ProcessBehavior, args=(behavior_params, behavior_queue, stop_event,))
 		behavior.start()
 
 		# Acquire cameras in parallel with Windows- and Linux-compatible pool
 		p = mp.get_context("spawn").Pool(params["numCams"])
 		#p.map_async(AcquireOneCamera,[(i, frame_queues[i], start_queues[i]) for i in range(params["numCams"])]).get()
 		p.starmap_async(AcquireOneCamera,[(i, frame_queues[i], start_queues[i]) for i in range(params["numCams"])]).get()
+		# Blocks until all camera processes finish
 
 		print('Camera acquisition finished')
 
-	stop_event.set()  # signal FrameProcessor to stop
+	stop_event.set()  # signal FrameProcessor and Behavior to stop
 	print('Signaled stop event')
 	behavior.join()
 	processor.join()  # wait for it to exit

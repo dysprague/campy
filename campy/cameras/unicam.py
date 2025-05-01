@@ -157,6 +157,18 @@ def read_frames(video_path, fidxs=None, grayscale=True):
             img = img[:, :, [0]]
         frames.append(img)
     return np.stack(frames, axis=0)
+
+def convert_rgb_to_bgr(image: tf.Tensor) -> tf.Tensor:
+    """Convert an RGB image to BGR format by reversing the channel order.
+
+    Args:
+        image: Tensor of any dtype with shape (..., 3) in RGB format. If grayscale, the
+            image will be converted to RGB first.
+
+    Returns:
+        The input image with the channels axis reversed.
+    """
+    return tf.reverse(image, axis=[-1])
 		
 def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue, stop_event):
 
@@ -300,13 +312,15 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 			grabResult = cam.GrabFrame(camera, frameNumber)
 			img = cam.GetImageArray(grabResult)
 
-			#with tf.device('/CPU:0'):
+			with tf.device('/CPU:0'):
 				#frame_use = frame/255
 				#frame_use = tf.image.convert_image_dtype(grabResult.Array, tf.float32)
-				#imresized = tf.cast(tf.image.resize(img, size=[600,960], method='bilinear', preserve_aspect_ratio=False, antialias=False,), img.dtype)
+				imresized = tf.cast(tf.image.resize(img, size=[600,960], method='bilinear', preserve_aspect_ratio=False, antialias=False,), img.dtype)
 			#	imresized = resize_image(img, 0.5)
-			#	imtranspose = tf.transpose(imresized, perm=[2,0,1])
-			#frameQueue.put(imtranspose)
+				imtranspose = tf.transpose(imresized, perm=[2,0,1])
+				imbgr = convert_rgb_to_bgr(imtranspose)
+
+			frameQueue.put(imbgr)
 
 			# Append numpy array to writeQueue for writer to append to file
 			#img = cam.GetImageArray(grabResult)

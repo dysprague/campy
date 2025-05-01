@@ -298,7 +298,7 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 
 	print(f'Setup camera')
 
-	#startQueue.get(block=True) #block until receive start signal from processing module
+	startQueue.get(block=True) #block until receive start signal from processing module
 
 	print('Start camera acquisition')
 

@@ -5,6 +5,8 @@ import scipy.io as sio
 from numpy.lib.format import open_memmap
 import cv2
 
+from time import perf_counter
+import traceback
 
 class BehaviorRecognizer:
     """
@@ -119,12 +121,11 @@ def triangulate(keypoints_2D, P_list, dist_coefs, K_list): #keys 3D is n_camsx23
         uv_list = undist_pts[:,j,:] 
         points_3d[i,:] = triangulate_point_multiview(uv_list, P_list)
 
-    return points_3d, dist_pts
+    return points_3d, undist_pts
     
 
 def correct_triangulations(points_3d, P_list, undist_pts, edges, bone_length_avg, w_bone=1.0):
     return points_3d #TODO: add triangulation corrections
-
 
 
 def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
@@ -158,8 +159,7 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
     cam_extrinsics = []
 
     for file in calibration_files:
-        params = sio.loadmat(file, simplify_cells=True)
-
+        params = sio.loadmat(f'{cam_calibration_path}/{file}', simplify_cells=True)
         cam_extrinsics.append({'K':params['K'], 'RDistort':params['RDistort'], 'TDistort':params['TDistort'], 'r':params['r'], 't':params['t']})
 
     P_list = []
@@ -201,7 +201,10 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
 
     while not stop_event.is_set():
         try:
+
             keypoints_2D, peak_vals  = BehaviorQueue.get() # 3x23x2, 3x23 matrices of peak locations and confidence
+
+            keys_obtained = perf_counter()
             # Queue get is blocking if empty
 
             mm_peaks_and_vals[frameNumber, :,:,:2] = keypoints_2D 
@@ -216,15 +219,16 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
             points_rotated = normalize_skeleton(keypoints_3D)
 
             if (frameNumber%100) == 0:
-                mm_peaks_and_vals.flush()
+                mm_peaks_and_vals.flush() #Flush buffer of memory maps every 100 frames or so
                 mm_keys_3D.flush()
 
             frameNumber += 1
 
+            beh_processed = perf_counter()
+
             #behav_PCA = process_keypoints(keypoints_3D, PCA_mat, num_PCs) # Produces num_pcs x1 vector
 
             #BehavRec.update(behav_PCA)
-
 
         except Exception as e:
             traceback.print_exc()

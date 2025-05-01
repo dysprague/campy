@@ -143,7 +143,6 @@ def ConfigureCamParams(systems, params, n_cam):
 	print('Loading camera')
 	cam_params = unicam.LoadDevice(systems, params, cam_params)
 	print('Camera loaded')
-	print(cam_params)
 
 	cam_params["cameraSerialNo"] = systems[cam_make]["serials"][cam_idx]
 

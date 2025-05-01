@@ -57,8 +57,6 @@ def AcquireOneCamera(n_cam, frameQueue, startQueue):
 	stopReadQueue = deque([],1)
 	stopWriteQueue = deque([],1)
 
-	print('Start acquisition trigger')
-
 	# Start grabbing frames ("producer" thread)
 	t = threading.Thread(
 		target = unicam.GrabFrames,
@@ -94,7 +92,6 @@ daemon = True,
 	# Start video file writer (main "consumer" process)
 	writer.WriteFrames(cam_params, writeQueue, stopReadQueue, stopWriteQueue)
 
-
 	print('Finishing AcquireSimulation')
 
 def Main():
@@ -102,16 +99,17 @@ def Main():
 		'n_cams':params["numCams"],
 		'model_path':'./models/250421_183045.single_instance.n=8280.trt.FP32',
 		'num_keypoints':23,
-		'img_shape': (2,3,600,960), # numCams x RGB x height x width
+		'img_shape': (params["numCams"],3,600,960), # numCams x RGB x height x width
 	}
 
 	behavior_params = {
-		'calibration_path': './extrinsics',
-		'calibration_files': [],
-		'skeleton': 'path to skeleton',
+		'calibration_path': './extrinsics/2025_04_30_2cam_calibration',
+		'calibration_files': ['hires_cam6_params.mat', 'hires_cam7_params.mat'],
+		'skeleton': './models/ARID1B_WK1_2022_10_10_M1_points.mat',
 		'edge_lengths':[],
 		'numImagesToGrab': int(round(params["recTimeInSec"]*params["frameRate"])),
-		'n_cams': params["numCams"]
+		'n_cams': params["numCams"],
+		'save_path': './test/keypoints'
 	}
 
 	manager = mp.Manager()
@@ -124,8 +122,8 @@ def Main():
 		processor = mp.Process(target=process.ProcessFrames, args=(process_params, frame_queues, behavior_queue, start_queues, stop_event,))
 		processor.start()
 
-		behavior = mp.Process(target=behavior.ProcessBehavior, args=(behavior_params, behavior_queue, stop_event,))
-		behavior.start()
+		behaviorProcess = mp.Process(target=behavior.ProcessBehavior, args=(behavior_params, behavior_queue, stop_event,))
+		behaviorProcess.start()
 
 		# Acquire cameras in parallel with Windows- and Linux-compatible pool
 		p = mp.get_context("spawn").Pool(params["numCams"])
@@ -137,23 +135,10 @@ def Main():
 
 	stop_event.set()  # signal FrameProcessor and Behavior to stop
 	print('Signaled stop event')
-	behavior.join()
+	behaviorProcess.join()
 	processor.join()  # wait for it to exit
 
 	CloseSystems(systems, params)
 
 # Open systems, creates global 'systems' and 'params' variables
 systems, params = OpenSystems()
-
-
-#procs = []
-
-#print(params["numCams"])
-#for i in range(params["numCams"]):
-#	print('Cam')
-#	acq_proc = mp.Process(target=AcquireOneCamera, args=(i, frame_queues[i], start_queues[i]))
-#	acq_proc.start()
-#	procs.append(acq_proc)
-
-#for proc in procs:
-#	proc.join()

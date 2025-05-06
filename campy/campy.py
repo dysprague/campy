@@ -104,7 +104,7 @@ def Main():
 
 	behavior_params = {
 		'calibration_path': './extrinsics/2025_04_30_2cam_calibration',
-		'calibration_files': ['hires_cam6_params.mat', 'hires_cam7_params.mat'],
+		'calibration_files': ['hires_cam7_params.mat', 'hires_cam6_params.mat'],
 		'skeleton': './models/ARID1B_WK1_2022_10_10_M1_points.mat',
 		'edge_lengths':[],
 		'numImagesToGrab': int(round(params["recTimeInSec"]*params["frameRate"])),
@@ -138,6 +138,7 @@ def Main():
 	behaviorProcess.join()
 	processor.join()  # wait for it to exit
 
+	print('Closing systems')
 	CloseSystems(systems, params)
 
 # Open systems, creates global 'systems' and 'params' variables

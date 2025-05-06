@@ -8,6 +8,67 @@ import cv2
 from time import perf_counter
 import traceback
 
+import time
+
+import serial
+import os
+
+class Teensy:
+    """
+    Interfaces with the Teensy device over a serial port.
+    The send_reward method sends a command to trigger tone and water reward.
+    """
+    def __init__(self, port):
+        self.port = port
+        try:
+            self.conn = serial.Serial(port, 115200)
+            self.conn.flushInput()
+        except Exception as e:
+            raise Exception(f"Unable to open serial port {port}: {e}")
+
+    def send_reward(self):
+        # Send command (e.g., "p\n") to trigger the reward pulse.
+        self.conn.write(b'p\n')
+
+    def __del__(self):
+        if hasattr(self, 'conn') and self.conn.isOpen():
+            self.conn.close()
+        print(f"Closed serial port {self.port}")
+
+
+class DataLogger:
+    def __init__(self, filename, batch_size=500):
+        self.filename = filename
+        self.batch_size = batch_size
+        # Open the file in line-buffered mode.
+        self.file = open(filename, 'w', buffering=1)
+        self.buffer = []
+        self.file.write("frame_index,timestamp,raw_time,log_time,differences,thresholds,trigger\n")
+        
+    def log(self, frame_index, timestamp, raw_time, log_time, per_dim_diff, thresholds, triggered):
+        diff_str = ",".join([f"{v:.3f}" for v in per_dim_diff])
+        thresh_str = ",".join([f"{v:.3f}" for v in thresholds])
+        line = f"{frame_index},{timestamp:.3f},{raw_time:.3f},{log_time:.3f},{diff_str},{thresh_str},{int(triggered)}\n"
+        self.buffer.append(line)
+        
+        # When enough log entries are accumulated, write them all to disk.
+        if len(self.buffer) >= self.batch_size:
+            self.file.write("".join(self.buffer))
+            self.file.flush()           # flush Python's internal buffer
+            os.fsync(self.file.fileno()) # force flush to disk
+            self.buffer = []  # clear the in-memory buffer
+        
+    def close(self):
+        if self.buffer:
+            self.file.write("".join(self.buffer))
+            self.file.flush()
+            os.fsync(self.file.fileno())
+            self.buffer = []
+        self.file.close()
+        
+    def __del__(self):
+        self.close()
+
 class BehaviorRecognizer:
     """
     Compares processed keypoint readings (already projected into D-dimensional space)
@@ -107,22 +168,26 @@ def triangulate_point_multiview(undist_points, P_list):
 
 
 def triangulate(keypoints_2D, P_list, dist_coefs, K_list): #keys 3D is n_camsx23x2
-
     keypoints_2D[:,:,1] = 1200 - keypoints_2D[:,:,1] # Flip y vals
-    
+        
     undist_pts = np.zeros(keypoints_2D.shape) # n_cams x n_keypoints x 2
 
     points_3d = np.zeros((keypoints_2D.shape[1], 3))
 
-    for i in range(keypoints_2D.shape[0]):
-        undist_pts[i,:,:] = undistort_points(keypoints_2D[i,:,:], K_list[i], dist_coefs[i])
+    try:
+        for i in range(keypoints_2D.shape[0]):
+            undist_pts[i,:,:] = undistort_points(keypoints_2D[i,:,:], K_list[i], np.array(dist_coefs[i]))
 
-    for j in range(keypoints_2D.shape[1]):
-        uv_list = undist_pts[:,j,:] 
-        points_3d[i,:] = triangulate_point_multiview(uv_list, P_list)
+        for j in range(keypoints_2D.shape[1]):
+            uv_list = undist_pts[:,j,:] 
+            points_3d[i,:] = triangulate_point_multiview(uv_list, P_list)
 
-    return points_3d, undist_pts
-    
+        return points_3d, undist_pts
+
+    except Exception as e:
+        #print(e)
+        
+        return points_3d, undist_pts
 
 def correct_triangulations(points_3d, P_list, undist_pts, edges, bone_length_avg, w_bone=1.0):
     return points_3d #TODO: add triangulation corrections
@@ -199,39 +264,62 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
 
     frameNumber = 0
 
+    #logger = DataLogger(log_filename) # need to set
+    teensy = Teensy('/dev/ttyACM0') # need to set
+    start_time = perf_counter()
+
+    print('Behavior initialized')
+
     while not stop_event.is_set():
-        try:
+        if not BehaviorQueue.empty():
+            try:
+                keypoints_2D, peak_vals  = BehaviorQueue.get() # 3x23x2, 3x23 matrices of peak locations and confidence
 
-            keypoints_2D, peak_vals  = BehaviorQueue.get() # 3x23x2, 3x23 matrices of peak locations and confidence
+                keys_obtained = perf_counter()
+                # Queue get is blocking if empty
 
-            keys_obtained = perf_counter()
-            # Queue get is blocking if empty
+                mm_peaks_and_vals[frameNumber, :,:,:2] = keypoints_2D 
+                mm_peaks_and_vals[frameNumber, :,:,2] = peak_vals
 
-            mm_peaks_and_vals[frameNumber, :,:,:2] = keypoints_2D 
-            mm_peaks_and_vals[frameNumber, :,:,2] = peak_vals
+                keypoints_3D, undist_pts = triangulate(keypoints_2D, P_list, dist_coefs, K_list)
 
-            keypoints_3D = triangulate(keypoints_2D, P_list, dist_coefs, K_list)
+                #TODO: add triangulation correction
 
-            #TODO: add triangulation correction
+                mm_keys_3D[frameNumber,:,:] = keypoints_3D
 
-            mm_keys_3D[frameNumber] = keypoints_3D
+                points_rotated = normalize_skeleton(keypoints_3D)
 
-            points_rotated = normalize_skeleton(keypoints_3D)
+                if (frameNumber%100) == 0:
+                    mm_peaks_and_vals.flush() #Flush buffer of memory maps every 100 frames or so
+                    mm_keys_3D.flush()
 
-            if (frameNumber%100) == 0:
-                mm_peaks_and_vals.flush() #Flush buffer of memory maps every 100 frames or so
-                mm_keys_3D.flush()
+                frameNumber += 1
 
-            frameNumber += 1
+                beh_processed = perf_counter()
 
-            beh_processed = perf_counter()
+                # test - send reward every 10 seconds
+                #if beh_processed - start_time > 10000:
 
-            #behav_PCA = process_keypoints(keypoints_3D, PCA_mat, num_PCs) # Produces num_pcs x1 vector
+                if frameNumber%100 == 0:
+                    print(f'Triggered reward on frame {frameNumber}')
+                    teensy.send_reward()
 
-            #BehavRec.update(behav_PCA)
 
-        except Exception as e:
-            traceback.print_exc()
+                #    start_time = beh_processed
+
+                #logger.log(frameNumber, sample_time, raw_relative_time, log_relative_time, triggered)
+
+
+                #behav_PCA = process_keypoints(keypoints_3D, PCA_mat, num_PCs) # Produces num_pcs x1 vector
+
+                #BehavRec.update(behav_PCA)
+
+
+            except Exception as e:
+                traceback.print_exc()
+
+        else:
+            time.sleep(0.005)
 
         
     

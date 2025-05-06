@@ -3,9 +3,9 @@
 # using ffmpeg's X264 codec
 
 # Recording parameters
-videoFolder: "./extrinsics/2025_04_29_4_T3"
+videoFolder: "./test/2025_05_06"
 videoFilename: "0.mp4"
-frameRate: 20
+frameRate: 10
 recTimeInSec: 300
 
 # Camera parameters

@@ -1,7 +1,7 @@
 import sys, time, logging, warnings
 import numpy as np
 import tensorflow as tf
-import os
+import os, csv
 import tensorrt 
 from typing import Tuple, Optional
 
@@ -151,17 +151,25 @@ def ProcessData():
     processdata["timeStamp"] = []
     processdata["frameNumber"] = []
     processdata["frameProcessTime"] = []
+    processdata["LoadOnQueue"] = []
     
     return processdata
 
-def triangulate(keypoints):
-    return keypoints
+def SaveMetadata(vid_folder, processdata):
 
-def SaveMetadata(process_params, processdata):
-    npy_filename = './test/frametimes_processed.npy'
+    csv_file = os.path.join(vid_folder, 'process_times.csv')
 
-    x = np.array([processdata['frameNumber'], processdata['timeStamp'], processdata['frameProcessTime']])
-    np.save(npy_filename,x)
+    keys_to_write = ['frameNumber', 'timeStamp', 'frameProcessTime', 'LoadOnQueue']
+    length = len(processdata[keys_to_write[0]])
+
+    with open(csv_file, 'w', newline='') as f:
+        w = csv.writer(f)
+
+        w.writerow(keys_to_write)
+        for i in range(length):
+            row = [processdata[key][i] for key in keys_to_write]
+
+            w.writerow(row)
 
 def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, stop_event):
 
@@ -169,6 +177,7 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
 
     print('GPU initialized')
 
+    vid_folder = process_params['video_folder']
     n_cams = process_params['n_cams']
     model_path = process_params['model_path']
     n_keypoints = process_params['num_keypoints']
@@ -215,10 +224,6 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
                             traceback.print_exc()
             
             if all(element for element in cam_frames):
-                #data = np.stack(cam_frames, axis=0)
-                #with tf.device('/GPU:0'):
-				# Create a tensor on the GPU
-                #    gpu_tensor = tf.convert_to_tensor(data)
                 pre_predict = time.perf_counter()
                 output = model.predict(gpu_tensor)
 
@@ -230,16 +235,17 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
                 peaks_numpy = peaks_numpy * 4 # Change based on input scaling and output stride
                 peaks_numpy = (peaks_numpy / 0.5) + 0.5
 
-                BehaviorQueue.put((peaks_numpy, peak_vals))
+                processed = time.perf_counter()
 
-                #trigger_reward = behavior.compare_template()
+                BehaviorQueue.put((peaks_numpy, peak_vals))
 
                 timeStamp = time.perf_counter()
                 framenumber +=1
 
                 processdata['frameNumber'].append(framenumber)
                 processdata['timeStamp'].append(pre_predict)
-                processdata['frameProcessTime'].append(timeStamp-pre_predict)
+                processdata['frameProcessTime'].append(processed-pre_predict)
+                processdata['LoadOnQueue'].append(timeStamp-processed)
 
                 cam_frames = [False]*n_cams
 
@@ -259,6 +265,6 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
 
     print(output.shape)
 
-    SaveMetadata(process_params, processdata)
+    SaveMetadata(vid_folder, processdata)
 
         

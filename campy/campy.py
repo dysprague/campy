@@ -96,26 +96,28 @@ daemon = True,
 
 def Main():
 	process_params = {
+		'video_folder':params["videoFolder"],
 		'n_cams':params["numCams"],
-		'model_path':'./models/250421_183045.single_instance.n=8280.trt.FP32',
+		'model_path':'./campy/models/250421_183045.single_instance.n=8280.trt.FP32',
 		'num_keypoints':23,
 		'img_shape': (params["numCams"],3,600,960), # numCams x RGB x height x width
 	}
 
 	behavior_params = {
-		'calibration_path': './extrinsics/2025_04_30_2cam_calibration',
+		'video_folder':params["videoFolder"],
+		'calibration_path': './campy/extrinsics/2025_04_30_2cam_calibration',
 		'calibration_files': ['hires_cam7_params.mat', 'hires_cam6_params.mat'],
-		'skeleton': './models/ARID1B_WK1_2022_10_10_M1_points.mat',
+		'skeleton': './campy/models/ARID1B_WK1_2022_10_10_M1_points.mat',
 		'edge_lengths':[],
 		'numImagesToGrab': int(round(params["recTimeInSec"]*params["frameRate"])),
 		'n_cams': params["numCams"],
-		'save_path': './test/keypoints'
+		'save_path': './campy/test/keypoints'
 	}
 
 	manager = mp.Manager()
-	frame_queues = [manager.Queue(maxsize=10) for _ in range(params["numCams"])]
-	start_queues = [manager.Queue(maxsize=10) for _ in range(params["numCams"])]
-	behavior_queue = manager.Queue(maxsize=10)
+	frame_queues = [manager.Queue(maxsize=20) for _ in range(params["numCams"])]
+	start_queues = [manager.Queue(maxsize=20) for _ in range(params["numCams"])]
+	behavior_queue = manager.Queue(maxsize=20)
 	
 	with HandleKeyboardInterrupt():
 		stop_event = mp.Event()

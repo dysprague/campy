@@ -11,7 +11,7 @@ import traceback
 import time
 
 import serial
-import os
+import os, csv
 
 class Teensy:
     """
@@ -27,8 +27,12 @@ class Teensy:
             raise Exception(f"Unable to open serial port {port}: {e}")
 
     def send_reward(self):
-        # Send command (e.g., "p\n") to trigger the reward pulse.
-        self.conn.write(b'p\n')
+        # Send command (e.g., "p") to trigger the reward pulse.
+        self.conn.write(b'p')
+
+    def send_trigger(self):
+        # send command to trigger camera acquisition
+        self.conn.write(b't')
 
     def __del__(self):
         if hasattr(self, 'conn') and self.conn.isOpen():
@@ -180,7 +184,7 @@ def triangulate(keypoints_2D, P_list, dist_coefs, K_list): #keys 3D is n_camsx23
 
         for j in range(keypoints_2D.shape[1]):
             uv_list = undist_pts[:,j,:] 
-            points_3d[i,:] = triangulate_point_multiview(uv_list, P_list)
+            points_3d[j,:] = triangulate_point_multiview(uv_list, P_list)
 
         return points_3d, undist_pts
 
@@ -191,6 +195,32 @@ def triangulate(keypoints_2D, P_list, dist_coefs, K_list): #keys 3D is n_camsx23
 
 def correct_triangulations(points_3d, P_list, undist_pts, edges, bone_length_avg, w_bone=1.0):
     return points_3d #TODO: add triangulation corrections
+
+def BehaviorData():
+
+    behaviordata = {}
+
+    behaviordata['frameNumber'] = []
+    behaviordata['behaviorProcessTime'] = [] 
+    behaviordata['finalTimeStamp'] = []
+
+    return behaviordata
+
+def SaveMetadata(vid_folder, behaviordata):
+
+    csv_file = os.path.join(vid_folder, 'behavior_times.csv')
+
+    keys_to_write = ['frameNumber', 'behaviorProcessTime', 'finalTimeStamp']
+    length = len(behaviordata[keys_to_write[0]])
+
+    with open(csv_file, 'w', newline='') as f:
+        w = csv.writer(f)
+
+        w.writerow(keys_to_write)
+        for i in range(length):
+            row = [behaviordata[key][i] for key in keys_to_write]
+
+            w.writerow(row)
 
 
 def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
@@ -203,6 +233,7 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
     '''
     print('Initializing behavior module')
 
+    vid_folder = behavior_params["video_folder"]
     cam_calibration_path = behavior_params["calibration_path"]
     calibration_files = behavior_params["calibration_files"]
     skel_file = behavior_params["skeleton"]
@@ -255,17 +286,24 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
     mm_keys_3D = open_memmap(f'{save_path}/triang_keys_3D.npy', mode='w+',
                              dtype=np.float64,
                              shape = (max_frames, 23, 3))
+    #mm_behav_pcs = open_memmap(f'{save_path}/behav_pcs.npy', mode='w+',
+    #                        dtype=np.float64,
+    #                        shape = (max_frames, 10))
 
     #num_PCs = template.shape[1]
-
+    #template_length = template.shape[0]
     #BehavRec = BehaviorRecognizer(template, num_PCs)
 
     print("Behavior analysis module initialized and ready")
 
     frameNumber = 0
 
+    behaviordata = BehaviorData()
+
     #logger = DataLogger(log_filename) # need to set
-    teensy = Teensy('/dev/ttyACM0') # need to set
+    #opcon_teensy = Teensy('/dev/ttyACM0') # need to set
+    #cam_teensy = Teensy('/dev/ttyUSB') # need to set !!! - this might need to come earlier?
+
     start_time = perf_counter()
 
     print('Behavior initialized')
@@ -295,31 +333,35 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
 
                 frameNumber += 1
 
+                # test to trigger reward every 100 frames
+                #if frameNumber%100 == 0:
+                #    print(f'Triggered reward on frame {frameNumber}')
+                #    teensy.send_reward()
+
+                
+                #behav_PCA = process_keypoints(keypoints_3D, PCA_mat, num_PCs) # Produces num_pcs x1 vector
+                #mm_behav_pcs[frameNumber,:] = behav_PCA # add to a mm
+
+                # need to get 
+
+
+
                 beh_processed = perf_counter()
 
-                # test - send reward every 10 seconds
-                #if beh_processed - start_time > 10000:
+                behaviordata['frameNumber'].append(frameNumber)
+                behaviordata['behaviorProcessTime'].append(beh_processed-keys_obtained)
+                behaviordata['finalTimeStamp'].append(beh_processed)
 
-                if frameNumber%100 == 0:
-                    print(f'Triggered reward on frame {frameNumber}')
-                    teensy.send_reward()
-
-
-                #    start_time = beh_processed
-
-                #logger.log(frameNumber, sample_time, raw_relative_time, log_relative_time, triggered)
-
-
-                #behav_PCA = process_keypoints(keypoints_3D, PCA_mat, num_PCs) # Produces num_pcs x1 vector
 
                 #BehavRec.update(behav_PCA)
-
 
             except Exception as e:
                 traceback.print_exc()
 
         else:
             time.sleep(0.005)
+
+    SaveMetadata(vid_folder, behaviordata)
 
         
     

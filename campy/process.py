@@ -9,6 +9,8 @@ from tensorflow.python.compiler.tensorrt import trt_convert as tf_trt
 from tensorflow.python.saved_model import tag_constants
 from typing import List, Optional, Text
 
+from campy.teensy import Teensy
+
 import traceback
 
 precision_dict = {
@@ -20,7 +22,10 @@ precision_dict = {
 def find_global_peaks_rough(
     cms: tf.Tensor, threshold: float = 0.1
 ) -> Tuple[tf.Tensor, tf.Tensor]:
-    """Find the global maximum for each sample and channel.
+    """
+    Adapted from SLEAP
+    
+    Find the global maximum for each sample and channel.
 
     Args:
         cms: Tensor of shape (samples, height, width, channels).
@@ -131,20 +136,6 @@ class OptimizedModel():
         
         self.loaded_model_fn = wrapper_fp32
 
-class BehaviorBuffer:
-    def __init__(self, num_frames, num_keypoints, dims, template):
-        self.buffer = np.zeros((num_frames, num_keypoints, dims))
-        self.template = template
-
-    def append(self, keypoints):
-        self.buffer[:-1] = self.buffer[1:]
-        self.buffer[-1] = keypoints
-
-    def get(self):
-        return self.buffer
-    
-    def compare_template():
-        return False
 
 def ProcessData():
     processdata = {}
@@ -182,8 +173,11 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
     model_path = process_params['model_path']
     n_keypoints = process_params['num_keypoints']
     img_shape = process_params['img_shape']
+    ser_port = process_params['serial_port']
 
     model = OptimizedModel(model_path)
+
+    trigger_teensy = Teensy(ser_port)
 
     print('Model loaded')
 
@@ -201,10 +195,17 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
 
     processdata = ProcessData()
 
-    framenumber = 0
+    #for sq in startQueues:
+    #    sq.put("start")
 
-    for sq in startQueues:
-        sq.put("start")
+    #trigger_teensy.send_single_trigger()
+
+    #time.sleep(1)
+
+    trigger_teensy.send_single_trigger()
+
+    first_run_done = False
+    framenumber = 0
 
     while not stop_event.is_set():
         try: 
@@ -240,12 +241,20 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
                 BehaviorQueue.put((peaks_numpy, peak_vals))
 
                 timeStamp = time.perf_counter()
-                framenumber +=1
 
-                processdata['frameNumber'].append(framenumber)
-                processdata['timeStamp'].append(pre_predict)
-                processdata['frameProcessTime'].append(processed-pre_predict)
-                processdata['LoadOnQueue'].append(timeStamp-processed)
+                if not first_run_done:
+                    framenumber = 0
+                    first_run_done = True
+                    time.sleep(0.05)
+                    trigger_teensy.send_start_signal()
+
+                else:
+                    framenumber +=1
+
+                    processdata['frameNumber'].append(framenumber)
+                    processdata['timeStamp'].append(pre_predict)
+                    processdata['frameProcessTime'].append(processed-pre_predict)
+                    processdata['LoadOnQueue'].append(timeStamp-processed)
 
                 cam_frames = [False]*n_cams
 
@@ -265,6 +274,7 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
 
     print(output.shape)
 
+    trigger_teensy.send_stop_signal()
     SaveMetadata(vid_folder, processdata)
 
         

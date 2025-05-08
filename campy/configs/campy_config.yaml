@@ -3,10 +3,10 @@
 # using ffmpeg's X264 codec
 
 # Recording parameters
-videoFolder: "./campy/test/2025_05_07"
+videoFolder: "./campy/test/2025_05_08_3"
 videoFilename: "0.mp4"
-frameRate: 20
-recTimeInSec: 120
+frameRate: 15
+recTimeInSec: 1800
 
 # Camera parameters
 numCams: 2

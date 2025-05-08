@@ -101,6 +101,7 @@ def Main():
 		'model_path':'./campy/models/250421_183045.single_instance.n=8280.trt.FP32',
 		'num_keypoints':23,
 		'img_shape': (params["numCams"],3,600,960), # numCams x RGB x height x width
+		'serial_port': '/dev/ttyACM1'
 	}
 
 	behavior_params = {

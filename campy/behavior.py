@@ -8,110 +8,112 @@ import cv2
 from time import perf_counter
 import traceback
 
+from collections import deque
+
+
 import time
+from campy.teensy import Teensy
 
 import serial
 import os, csv
 
-class Teensy:
-    """
-    Interfaces with the Teensy device over a serial port.
-    The send_reward method sends a command to trigger tone and water reward.
-    """
-    def __init__(self, port):
-        self.port = port
-        try:
-            self.conn = serial.Serial(port, 115200)
-            self.conn.flushInput()
-        except Exception as e:
-            raise Exception(f"Unable to open serial port {port}: {e}")
-
-    def send_reward(self):
-        # Send command (e.g., "p") to trigger the reward pulse.
-        self.conn.write(b'p')
-
-    def send_trigger(self):
-        # send command to trigger camera acquisition
-        self.conn.write(b't')
-
-    def __del__(self):
-        if hasattr(self, 'conn') and self.conn.isOpen():
-            self.conn.close()
-        print(f"Closed serial port {self.port}")
-
-
 class DataLogger:
     def __init__(self, filename, batch_size=500):
-        self.filename = filename
+        self.filename   = filename
         self.batch_size = batch_size
-        # Open the file in line-buffered mode.
-        self.file = open(filename, 'w', buffering=1)
-        self.buffer = []
-        self.file.write("frame_index,timestamp,raw_time,log_time,differences,thresholds,trigger\n")
-        
-    def log(self, frame_index, timestamp, raw_time, log_time, per_dim_diff, thresholds, triggered):
-        diff_str = ",".join([f"{v:.3f}" for v in per_dim_diff])
-        thresh_str = ",".join([f"{v:.3f}" for v in thresholds])
-        line = f"{frame_index},{timestamp:.3f},{raw_time:.3f},{log_time:.3f},{diff_str},{thresh_str},{int(triggered)}\n"
+        self.file       = open(filename, 'w', newline='', buffering=1)
+        self.buffer     = []
+        self.file.write(
+            "frame,queue_time,head_height,triggered,trigger_time\n"
+        )
+
+    def log(self, frame, t_queue, head_height, triggered, t_trigger=None):
+        """
+        frame        : int
+        t_queue      : float, when we got data from the queue
+        head_height  : float
+        triggered    : bool (0/1)
+        t_trigger    : float or '' (timestamp of reward send)
+        """
+        trig_time = f"{t_trigger:.6f}" if triggered else ""
+        line = (
+            f"{frame},{t_queue:.6f},{head_height:.3f},{int(triggered)},{trig_time}\n"
+        )
         self.buffer.append(line)
-        
-        # When enough log entries are accumulated, write them all to disk.
         if len(self.buffer) >= self.batch_size:
-            self.file.write("".join(self.buffer))
-            self.file.flush()           # flush Python's internal buffer
-            os.fsync(self.file.fileno()) # force flush to disk
-            self.buffer = []  # clear the in-memory buffer
-        
-    def close(self):
-        if self.buffer:
-            self.file.write("".join(self.buffer))
+            self.file.write(''.join(self.buffer))
             self.file.flush()
             os.fsync(self.file.fileno())
-            self.buffer = []
+            self.buffer.clear()
+
+    def close(self):
+        if self.buffer:
+            self.file.write(''.join(self.buffer))
+            self.file.flush()
+            os.fsync(self.file.fileno())
+            self.buffer.clear()
         self.file.close()
-        
+
     def __del__(self):
         self.close()
 
-class BehaviorRecognizer:
+
+
+class BehaviorRule:
     """
-    Compares processed keypoint readings (already projected into D-dimensional space)
-    against a candidate template (of shape (window_size, D)) using a sliding window.
-    The per-dimension error is computed as the maximum absolute difference between the
-    window's values and the candidate template.
-    Returns:
-      scalar_diff: overall maximum error (scalar),
-      per_dim_diff: vector of maximum errors per dimension,
-      data_arr: the buffered (processed) window.
+    Base class: keeps a rolling buffer of the last buffer_duration seconds of data,
+    and enforces a refractory period between triggers.
     """
-    def __init__(self, template, D):
-         # candidate_template is provided from the configuration loader.
-        self.template = template   # shape: (window_size, D)
-        self.template_length = self.template.shape[0]
-        self.D = D
-        self.buffer = []
+    def __init__(self, buffer_duration, refractory=0.0):
+        self.buffer_duration  = buffer_duration
+        self.refractory       = refractory
+        self._last_trigger    = -np.inf
+        self.buffer           = deque()   # holds (t, data) pairs
 
-    def update(self, keypoint_reading):
+    def _can_trigger(self, t):
+        return (t - self._last_trigger) >= self.refractory
 
-        self.buffer.append(keypoint_reading.keypoints)
+    def update(self, data, t):
+        # 1) Manage the timestamped buffer
+        self.buffer.append((t, data))
+        cutoff = t - self.buffer_duration
+        while self.buffer and self.buffer[0][0] < cutoff:
+            self.buffer.popleft()
 
-        # If we don't have enough samples yet, return None.
-        if len(self.buffer) < self.template_length:
-            return None
-        
-        # Keep only the most recent samples matching the template length.
-        if len(self.buffer) > self.template_length:
-            self.buffer = self.buffer[-self.template_length:]
+        # 2) Base always returns False; subclasses override this
+        return False
 
-        # Stack
-        data_arr = np.array(self.buffer)  # shape: (template_length, n_features)
 
-        # Compute similarity: max absolute difference
-        diff = np.abs(data_arr - self.template)
-        per_dim_diff = np.max(diff, axis=0)
-        scalar_diff = np.max(per_dim_diff)
-         
-        return scalar_diff, per_dim_diff, data_arr
+class HeadHoldRule(BehaviorRule):
+    """
+    Fires once when head-height stays within [head_min, head_max]
+    for at least hold_time seconds, then respects refractory.
+    """
+    def __init__(self, buffer_duration, head_min, head_max, hold_time, refractory=0.0):
+        super().__init__(buffer_duration, refractory)
+        self.head_min  = head_min
+        self.head_max  = head_max
+        self.hold_time = hold_time
+        self._enter_t  = None
+
+    def update(self, keypoints, t):
+        super().update(keypoints, t)
+
+        # compute current head height
+        head_z = float(np.mean(keypoints[:2, 2]))
+
+        fired = False
+        if self.head_min <= head_z <= self.head_max:
+            if self._enter_t is None:
+                self._enter_t = t
+            elif (t - self._enter_t) >= self.hold_time and self._can_trigger(t):
+                fired = True
+        else:
+            self._enter_t = None
+
+        if fired:
+            self._last_trigger = t
+        return fired
 
 
 def normalize_skeleton(points_3d):
@@ -172,7 +174,7 @@ def triangulate_point_multiview(undist_points, P_list):
 
 
 def triangulate(keypoints_2D, P_list, dist_coefs, K_list): #keys 3D is n_camsx23x2
-    keypoints_2D[:,:,1] = 1200 - keypoints_2D[:,:,1] # Flip y vals
+    #keypoints_2D[:,:,1] = 1200 - keypoints_2D[:,:,1] # Flip y vals
         
     undist_pts = np.zeros(keypoints_2D.shape) # n_cams x n_keypoints x 2
 
@@ -185,6 +187,8 @@ def triangulate(keypoints_2D, P_list, dist_coefs, K_list): #keys 3D is n_camsx23
         for j in range(keypoints_2D.shape[1]):
             uv_list = undist_pts[:,j,:] 
             points_3d[j,:] = triangulate_point_multiview(uv_list, P_list)
+
+        #points_3d[:,2] = 100 -points_3d[:,2] # correct for flipping
 
         return points_3d, undist_pts
 
@@ -238,7 +242,7 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
     calibration_files = behavior_params["calibration_files"]
     skel_file = behavior_params["skeleton"]
     edge_lengths = behavior_params['edge_lengths']
-    max_frames = behavior_params["numImagesToGrab"]
+    max_frames = behavior_params["numImagesToGrab"]+1
     n_cams = behavior_params['n_cams']
     save_path = behavior_params['save_path']
 
@@ -286,74 +290,87 @@ def ProcessBehavior(behavior_params, BehaviorQueue, stop_event):
     mm_keys_3D = open_memmap(f'{save_path}/triang_keys_3D.npy', mode='w+',
                              dtype=np.float64,
                              shape = (max_frames, 23, 3))
-    #mm_behav_pcs = open_memmap(f'{save_path}/behav_pcs.npy', mode='w+',
-    #                        dtype=np.float64,
-    #                        shape = (max_frames, 10))
 
-    #num_PCs = template.shape[1]
-    #template_length = template.shape[0]
-    #BehavRec = BehaviorRecognizer(template, num_PCs)
 
     print("Behavior analysis module initialized and ready")
 
-    frameNumber = 0
-
     behaviordata = BehaviorData()
 
-    #logger = DataLogger(log_filename) # need to set
-    #opcon_teensy = Teensy('/dev/ttyACM0') # need to set
-    #cam_teensy = Teensy('/dev/ttyUSB') # need to set !!! - this might need to come earlier?
+    # parameters - should eventually be set in config file
+    buffer_secs = 5.0
+    head_min    = 115.0
+    head_max    = 500.0
+    hold_time   = 0.5     # must hold for 500 ms
+    refractory  = 2.0     # then wait 2 s before next reward
 
+    opcon_teensy = Teensy('/dev/ttyACM0') # add to config file
+    logger = DataLogger(os.path.join(save_path, 'behavior_log.csv'))
+    rule = HeadHoldRule(buffer_secs, head_min, head_max, hold_time, refractory)
+    
     start_time = perf_counter()
+
+    first_run_done = False
+    frameNumber = 0
 
     print('Behavior initialized')
 
     while not stop_event.is_set():
         if not BehaviorQueue.empty():
             try:
-                keypoints_2D, peak_vals  = BehaviorQueue.get() # 3x23x2, 3x23 matrices of peak locations and confidence
 
+                # GET AND STORE RAW DATA
+                keypoints_2D, peak_vals  = BehaviorQueue.get() # 3x23x2, 3x23 matrices of peak locations and confidence
                 keys_obtained = perf_counter()
                 # Queue get is blocking if empty
-
                 mm_peaks_and_vals[frameNumber, :,:,:2] = keypoints_2D 
                 mm_peaks_and_vals[frameNumber, :,:,2] = peak_vals
 
-                keypoints_3D, undist_pts = triangulate(keypoints_2D, P_list, dist_coefs, K_list)
 
+                # PRE-PROCESS KEYPOINTS TO GET TRIANGULATED EGOCENTRIC POINTS
+                keypoints_3D, undist_pts = triangulate(keypoints_2D, P_list, dist_coefs, K_list)
                 #TODO: add triangulation correction
 
                 mm_keys_3D[frameNumber,:,:] = keypoints_3D
-
                 points_rotated = normalize_skeleton(keypoints_3D)
+                beh_processed = perf_counter() # sorry moved this around, which step was this meant to correspond to? -kh
 
+                points_rotated[:, 2] = 100 - points_rotated[:,2]
+
+                if not first_run_done:
+                    frameNumber=0
+                    first_run_done=True
+                    print('First frame fully processed')
+
+                # REWARD (OR NOT) BASED ON BEHAVIOR
+                reward = rule.update(points_rotated, keys_obtained) #TODO: get camera acquisition time from camera process
+                if reward:
+                    print(f'Triggered reward on frame {frameNumber}')
+                    opcon_teensy.send_reward()
+                    t_trigger = perf_counter()
+                else:
+                    t_trigger = None
+
+                # test to trigger reward every 100 frames
+                #if frameNumber%100 == 0:
+                #    print(f'Triggered reward on frame {frameNumber}')
+                #    opcon_teensy.send_reward()
+                #    t_trigger = perf_counter()
+                #else:
+                #    t_trigger = None
+
+                # LOG 
+                head_height = float(np.mean(points_rotated[:2,2])) # this is clunky.. 
+                logger.log(frameNumber, keys_obtained, head_height, reward, t_trigger)
+                behaviordata['frameNumber'].append(frameNumber)
+                behaviordata['behaviorProcessTime'].append(beh_processed-keys_obtained)
+                behaviordata['finalTimeStamp'].append(beh_processed)
+
+                # HOUSEKEEPING
                 if (frameNumber%100) == 0:
                     mm_peaks_and_vals.flush() #Flush buffer of memory maps every 100 frames or so
                     mm_keys_3D.flush()
 
                 frameNumber += 1
-
-                # test to trigger reward every 100 frames
-                #if frameNumber%100 == 0:
-                #    print(f'Triggered reward on frame {frameNumber}')
-                #    teensy.send_reward()
-
-                
-                #behav_PCA = process_keypoints(keypoints_3D, PCA_mat, num_PCs) # Produces num_pcs x1 vector
-                #mm_behav_pcs[frameNumber,:] = behav_PCA # add to a mm
-
-                # need to get 
-
-
-
-                beh_processed = perf_counter()
-
-                behaviordata['frameNumber'].append(frameNumber)
-                behaviordata['behaviorProcessTime'].append(beh_processed-keys_obtained)
-                behaviordata['finalTimeStamp'].append(beh_processed)
-
-
-                #BehavRec.update(behav_PCA)
 
             except Exception as e:
                 traceback.print_exc()

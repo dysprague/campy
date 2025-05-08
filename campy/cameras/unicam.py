@@ -300,14 +300,16 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 
 	print(f'Setup camera')
 
-	startQueue.get(block=True) #block until receive start signal from processing module
+	#startQueue.get(block=True) #block until receive start signal from processing module
 
 	print('Start camera acquisition')
 
 	# Start grabbing frames from the camera
 	grabbing = StartGrabbing(camera, cam_params, cam)
 
+	first_run_done = False
 	frameNumber = 0
+
 	while(not stopReadQueue):
 		try:
 			pre_grab = perf_counter()
@@ -326,9 +328,9 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 				imresized = tf.cast(tf.image.resize(img, size=[600,960], method='bilinear', preserve_aspect_ratio=False, antialias=False,), img.dtype)
 			#	imresized = resize_image(img, 0.5)
 				imtranspose = tf.transpose(imresized, perm=[2,0,1])
-				#imbgr = convert_rgb_to_bgr(imtranspose)
+				imbgr = convert_rgb_to_bgr(imtranspose)
 
-			frameQueue.put(imtranspose) #testing without channel flipping
+			frameQueue.put(imbgr) #testing without channel flipping
 
 			preprocess = perf_counter()
 
@@ -339,21 +341,27 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 
 			post_write = perf_counter()
 
-			frameNumber += 1
+			if not first_run_done: #do single first run to intialize
+				frameNumber=0
+				first_run_done=True
+				print('First image acquired')
 
-			# Display converted, downsampled image in the Window
-			#if frameNumber % grabdata["frameRatio"] == 0:
-				#print(imresized.shape)
-				#img = cam.DisplayImage(cam_params, dispQueue, grabResult)
+			else:
+				frameNumber += 1
 
-			grabdata['frameNumber'].append(frameNumber) # first frame = 1
-			timeStamp = cam.GetTimeStamp(grabResult)
-			grabdata['timeStamp'].append(timeStamp)
-			grabdata['startTime'].append(pre_grab)
-			grabdata["GrabTime"].append(post_grab-pre_grab)
-			grabdata["PreprocessTime"].append(preprocess-post_grab)
-			grabdata["LoadOnWrite"].append(post_write-preprocess)
-			grabdata["ProcessQueueTimeStamp"].append(preprocess)
+				# Display converted, downsampled image in the Window
+				#if frameNumber % grabdata["frameRatio"] == 0:
+					#print(imresized.shape)
+					#img = cam.DisplayImage(cam_params, dispQueue, grabResult)
+
+				grabdata['frameNumber'].append(frameNumber) # first frame = 1
+				timeStamp = cam.GetTimeStamp(grabResult)
+				grabdata['timeStamp'].append(timeStamp)
+				grabdata['startTime'].append(pre_grab)
+				grabdata["GrabTime"].append(post_grab-pre_grab)
+				grabdata["PreprocessTime"].append(preprocess-post_grab)
+				grabdata["LoadOnWrite"].append(post_write-preprocess)
+				grabdata["ProcessQueueTimeStamp"].append(preprocess)
 
 			CountFPS(grabdata, frameNumber, timeStamp)
 
@@ -363,7 +371,6 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 				break
 
 		except Exception as e:
-			print(e)
 			if cam_params["cameraDebug"]:
 				logging.error('Caught exception at cameras/unicam.py GrabFrames: {}'.format(e))
 			time.sleep(0.001)

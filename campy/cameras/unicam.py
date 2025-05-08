@@ -10,6 +10,7 @@ import tensorflow as tf
 from scipy import io as sio
 import cv2
 import traceback
+from time import perf_counter
 
 
 def ImportCam(make):
@@ -93,6 +94,11 @@ def GrabData(cam_params):
 	grabdata = {}
 	grabdata["timeStamp"] = []
 	grabdata["frameNumber"] = []
+	grabdata["GrabTime"] = []
+	grabdata["PreprocessTime"] = []
+	grabdata["LoadOnWrite"] = []
+	grabdata["ProcessQueueTimeStamp"] = []
+	grabdata['startTime'] = []
 	grabdata["cameraName"] = cam_params["cameraName"]
 
 	# Calculate display rate
@@ -116,8 +122,11 @@ def StartGrabbing(camera, cam_params, cam):
 		print(cam_params["cameraName"], "ready to trigger.")
 	return grabbing
 
-def convert_rgb_to_bgr(image: tf.Tensor) -> tf.Tensor:
-    """Convert an RGB image to BGR format by reversing the channel order.
+def convert_rgb_to_bgr(image: tf.Tensor) -> tf.Tensor: 
+    """
+	SLEAP function ported into campy
+
+	Convert an RGB image to BGR format by reversing the channel order.
 
     Args:
         image: Tensor of any dtype with shape (..., 3) in RGB format. If grayscale, the
@@ -158,17 +167,6 @@ def read_frames(video_path, fidxs=None, grayscale=True):
         frames.append(img)
     return np.stack(frames, axis=0)
 
-def convert_rgb_to_bgr(image: tf.Tensor) -> tf.Tensor:
-    """Convert an RGB image to BGR format by reversing the channel order.
-
-    Args:
-        image: Tensor of any dtype with shape (..., 3) in RGB format. If grayscale, the
-            image will be converted to RGB first.
-
-    Returns:
-        The input image with the channels axis reversed.
-    """
-    return tf.reverse(image, axis=[-1])
 		
 def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, stopWriteQueue, stop_event):
 
@@ -231,6 +229,7 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 			grabdata['readTime'].append(prepreprocess-preread)
 			grabdata['preprocess'].append(timeStamp-prepreprocess)
 			grabdata['loadonqueue'].append(post_put_on_queue-prepreprocess)
+			
 
 
 		except Exception as e:
@@ -254,7 +253,10 @@ def SimulateFrames(n_cam, writeQueue, frameQueue, startQueue, stopReadQueue, sto
 	stopWriteQueue.append('STOP')
 
 def resize_image(image: tf.Tensor, scale: tf.Tensor) -> tf.Tensor:
-    """Rescale an image by a scale factor.
+    """
+	SLEAP function ported into campy
+	
+	Rescale an image by a scale factor.
 
     This function is primarily a convenience wrapper for `tf.image.resize` that
     calculates the new shape from the scale factor.
@@ -298,19 +300,27 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 
 	print(f'Setup camera')
 
-	startQueue.get(block=True) #block until receive start signal from processing module
+	#startQueue.get(block=True) #block until receive start signal from processing module
 
 	print('Start camera acquisition')
 
 	# Start grabbing frames from the camera
 	grabbing = StartGrabbing(camera, cam_params, cam)
 
+	first_run_done = False
 	frameNumber = 0
+
 	while(not stopReadQueue):
 		try:
+			pre_grab = perf_counter()
 			# Grab image from camera buffer if available
 			grabResult = cam.GrabFrame(camera, frameNumber)
 			img = cam.GetImageArray(grabResult)
+
+			#if frameNumber == 0: #Img read from camera is in rgb 
+			#	np.save('./test/CamGrabSave.npy', img)
+
+			post_grab = perf_counter()
 
 			with tf.device('/CPU:0'):
 				#frame_use = frame/255
@@ -320,22 +330,38 @@ def GrabFrames(cam_params, writeQueue, frameQueue, startQueue, stopReadQueue, st
 				imtranspose = tf.transpose(imresized, perm=[2,0,1])
 				imbgr = convert_rgb_to_bgr(imtranspose)
 
-			frameQueue.put(imbgr)
+			frameQueue.put(imbgr) #testing without channel flipping
+
+			preprocess = perf_counter()
 
 			# Append numpy array to writeQueue for writer to append to file
 			#img = cam.GetImageArray(grabResult)
 			writeQueue.put(img)
 			# Append timeStamp and frameNumber to grabdata
-			frameNumber += 1
 
-			# Display converted, downsampled image in the Window
-			#if frameNumber % grabdata["frameRatio"] == 0:
-				#print(imresized.shape)
-				#img = cam.DisplayImage(cam_params, dispQueue, grabResult)
+			post_write = perf_counter()
 
-			grabdata['frameNumber'].append(frameNumber) # first frame = 1
-			timeStamp = cam.GetTimeStamp(grabResult)
-			grabdata['timeStamp'].append(timeStamp)
+			if not first_run_done: #do single first run to intialize
+				frameNumber=0
+				first_run_done=True
+				print('First image acquired')
+
+			else:
+				frameNumber += 1
+
+				# Display converted, downsampled image in the Window
+				#if frameNumber % grabdata["frameRatio"] == 0:
+					#print(imresized.shape)
+					#img = cam.DisplayImage(cam_params, dispQueue, grabResult)
+
+				grabdata['frameNumber'].append(frameNumber) # first frame = 1
+				timeStamp = cam.GetTimeStamp(grabResult)
+				grabdata['timeStamp'].append(timeStamp)
+				grabdata['startTime'].append(pre_grab)
+				grabdata["GrabTime"].append(post_grab-pre_grab)
+				grabdata["PreprocessTime"].append(preprocess-post_grab)
+				grabdata["LoadOnWrite"].append(post_write-preprocess)
+				grabdata["ProcessQueueTimeStamp"].append(preprocess)
 
 			CountFPS(grabdata, frameNumber, timeStamp)
 
@@ -407,6 +433,20 @@ def SaveMetadata(cam_params, grabdata):
 				# Print items that are not objects or dicts
 				if isinstance(row[1],(list,str,int,float)):
 					w.writerow(row)
+
+		csv_timing = os.path.join(full_folder_name, 'timestamps.csv')
+
+		keys_to_write = ['frameNumber', 'timeStamp', 'startTime', 'GrabTime', 'PreprocessTime', 'LoadOnWrite', 'ProcessQueueTimeStamp']
+		length = len(grabdata[keys_to_write[0]])
+
+		with open(csv_timing, 'w', newline='') as f:
+			w = csv.writer(f)
+
+			w.writerow(keys_to_write)
+			for i in range(length):
+				row = [grabdata[key][i] for key in keys_to_write]
+
+				w.writerow(row)
 
 		print('Saved metadata for {}.'.format(cam_params['cameraName']))
 

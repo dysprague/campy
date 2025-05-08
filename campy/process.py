@@ -1,13 +1,15 @@
 import sys, time, logging, warnings
 import numpy as np
 import tensorflow as tf
-import os
+import os, csv
 import tensorrt 
 from typing import Tuple, Optional
 
 from tensorflow.python.compiler.tensorrt import trt_convert as tf_trt
 from tensorflow.python.saved_model import tag_constants
 from typing import List, Optional, Text
+
+from campy.teensy import Teensy
 
 import traceback
 
@@ -20,7 +22,10 @@ precision_dict = {
 def find_global_peaks_rough(
     cms: tf.Tensor, threshold: float = 0.1
 ) -> Tuple[tf.Tensor, tf.Tensor]:
-    """Find the global maximum for each sample and channel.
+    """
+    Adapted from SLEAP
+    
+    Find the global maximum for each sample and channel.
 
     Args:
         cms: Tensor of shape (samples, height, width, channels).
@@ -131,37 +136,31 @@ class OptimizedModel():
         
         self.loaded_model_fn = wrapper_fp32
 
-class BehaviorBuffer:
-    def __init__(self, num_frames, num_keypoints, dims, template):
-        self.buffer = np.zeros((num_frames, num_keypoints, dims))
-        self.template = template
-
-    def append(self, keypoints):
-        self.buffer[:-1] = self.buffer[1:]
-        self.buffer[-1] = keypoints
-
-    def get(self):
-        return self.buffer
-    
-    def compare_template():
-        return False
 
 def ProcessData():
     processdata = {}
     processdata["timeStamp"] = []
     processdata["frameNumber"] = []
     processdata["frameProcessTime"] = []
+    processdata["LoadOnQueue"] = []
     
     return processdata
 
-def triangulate(keypoints):
-    return keypoints
+def SaveMetadata(vid_folder, processdata):
 
-def SaveMetadata(process_params, processdata):
-    npy_filename = './test/frametimes_processed.npy'
+    csv_file = os.path.join(vid_folder, 'process_times.csv')
 
-    x = np.array([processdata['frameNumber'], processdata['timeStamp'], processdata['frameProcessTime']])
-    np.save(npy_filename,x)
+    keys_to_write = ['frameNumber', 'timeStamp', 'frameProcessTime', 'LoadOnQueue']
+    length = len(processdata[keys_to_write[0]])
+
+    with open(csv_file, 'w', newline='') as f:
+        w = csv.writer(f)
+
+        w.writerow(keys_to_write)
+        for i in range(length):
+            row = [processdata[key][i] for key in keys_to_write]
+
+            w.writerow(row)
 
 def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, stop_event):
 
@@ -169,12 +168,16 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
 
     print('GPU initialized')
 
+    vid_folder = process_params['video_folder']
     n_cams = process_params['n_cams']
     model_path = process_params['model_path']
     n_keypoints = process_params['num_keypoints']
     img_shape = process_params['img_shape']
+    ser_port = process_params['serial_port']
 
     model = OptimizedModel(model_path)
+
+    trigger_teensy = Teensy(ser_port)
 
     print('Model loaded')
 
@@ -192,10 +195,17 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
 
     processdata = ProcessData()
 
-    framenumber = 0
+    #for sq in startQueues:
+    #    sq.put("start")
 
-    for sq in startQueues:
-        sq.put("start")
+    #trigger_teensy.send_single_trigger()
+
+    #time.sleep(1)
+
+    trigger_teensy.send_single_trigger()
+
+    first_run_done = False
+    framenumber = 0
 
     while not stop_event.is_set():
         try: 
@@ -215,10 +225,6 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
                             traceback.print_exc()
             
             if all(element for element in cam_frames):
-                #data = np.stack(cam_frames, axis=0)
-                #with tf.device('/GPU:0'):
-				# Create a tensor on the GPU
-                #    gpu_tensor = tf.convert_to_tensor(data)
                 pre_predict = time.perf_counter()
                 output = model.predict(gpu_tensor)
 
@@ -230,16 +236,25 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
                 peaks_numpy = peaks_numpy * 4 # Change based on input scaling and output stride
                 peaks_numpy = (peaks_numpy / 0.5) + 0.5
 
+                processed = time.perf_counter()
+
                 BehaviorQueue.put((peaks_numpy, peak_vals))
 
-                #trigger_reward = behavior.compare_template()
-
                 timeStamp = time.perf_counter()
-                framenumber +=1
 
-                processdata['frameNumber'].append(framenumber)
-                processdata['timeStamp'].append(pre_predict)
-                processdata['frameProcessTime'].append(timeStamp-pre_predict)
+                if not first_run_done:
+                    framenumber = 0
+                    first_run_done = True
+                    time.sleep(0.05)
+                    trigger_teensy.send_start_signal()
+
+                else:
+                    framenumber +=1
+
+                    processdata['frameNumber'].append(framenumber)
+                    processdata['timeStamp'].append(pre_predict)
+                    processdata['frameProcessTime'].append(processed-pre_predict)
+                    processdata['LoadOnQueue'].append(timeStamp-processed)
 
                 cam_frames = [False]*n_cams
 
@@ -259,6 +274,7 @@ def ProcessFrames(process_params, ProcessQueues, BehaviorQueue, startQueues, sto
 
     print(output.shape)
 
-    SaveMetadata(process_params, processdata)
+    trigger_teensy.send_stop_signal()
+    SaveMetadata(vid_folder, processdata)
 
         

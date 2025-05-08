@@ -3,16 +3,16 @@
 # using ffmpeg's X264 codec
 
 # Recording parameters
-videoFolder: "./test/2025_05_06"
+videoFolder: "./campy/test/2025_05_08_3"
 videoFilename: "0.mp4"
-frameRate: 10
-recTimeInSec: 300
+frameRate: 15
+recTimeInSec: 1800
 
 # Camera parameters
 numCams: 2
 cameraMake: "basler"
 cameraNames: ['Camera0', 'Camera1']
-cameraSettings: "./configs/a2A1920-160ucBAS_40054255_10_22_2020.pfs"
+cameraSettings: "./campy/configs/a2A1920-160ucBAS_40054255_10_22_2020.pfs"
 frameWidth: 1920
 frameHeight: 1200
 
